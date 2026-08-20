@@ -1,0 +1,214 @@
+"""FastAPI backend for the swarm — a plain JSON API consumed by the React UI in frontend/
+(run separately via `npm run dev`, see frontend/README or the project README). This process owns
+the job engine and doesn't serve any frontend assets itself."""
+import threading
+import uuid
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from orchestrator import chat, runner, store
+from orchestrator.agents import CLAUDE_MODELS, DEFAULT_MODELS, OPENAI_MODELS, PROVIDERS, plan_project
+from orchestrator.git_tools import init_repo
+from orchestrator.pipeline import repo_listing, resume_job, run_job
+
+app = FastAPI(title="Agent Swarm")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+class PlanRequest(BaseModel):
+    prompt: str
+    repo_path: str
+    instructions: str = ""  # optional guidance for the planner block specifically
+    model: str = DEFAULT_MODELS["planner"]
+
+
+class TreeSubtask(BaseModel):
+    task: str
+    acceptance: str
+
+
+class Tree(BaseModel):
+    summary: str
+    subtasks: list[TreeSubtask]
+    num_devs: int = 1
+
+
+class JobRequest(BaseModel):
+    prompt: str
+    repo_path: str
+    plan: list[Tree]  # the (possibly user-edited) plan returned by /plan, confirmed by the user
+    block_instructions: dict[str, str] = {}  # keys: planner, tree_1_team_lead, tree_1_dev_1, auditor, ...
+    max_cost: float = 1.0
+    gate_caps: dict[str, int] = store.DEFAULT_GATE_CAPS  # keys: team_lead, check_and_test, auditor
+    models: dict[str, str] = {}  # keys: team_lead, dev, check_and_test, auditor (planner is fixed at /plan time)
+
+
+class ResumeRequest(BaseModel):
+    instructions: str
+
+
+class CreateRepoRequest(BaseModel):
+    path: str
+    github: bool = False  # accepted now so the request shape is stable once GitHub sync is built
+
+
+class ChatStartRequest(BaseModel):
+    repo_path: str
+
+
+class ChatMessageRequest(BaseModel):
+    message: str
+
+
+class RunRequest(BaseModel):
+    path: str
+
+
+@app.get("/models")
+def list_models():
+    """Backend is the single source of truth for which models exist and which provider each gate
+    type is restricted to — the frontend fetches this once instead of keeping its own copy that could
+    drift out of sync (e.g. if a model gets renamed/retired, this is the only place to update)."""
+    return {
+        "providers": PROVIDERS, "default_models": DEFAULT_MODELS,
+        "claude_models": CLAUDE_MODELS, "openai_models": OPENAI_MODELS,
+    }
+
+
+@app.post("/plan")
+def plan(req: PlanRequest):
+    """Stateless — the top-level Sonnet planning call, run before any job exists so you can review
+    and edit the tree/dev breakdown before committing to it. No job or cost is recorded here beyond
+    this one call; the confirmed plan gets POSTed back as part of /jobs to actually start a run."""
+    try:
+        trees = plan_project(req.prompt, repo_listing(req.repo_path), instructions=req.instructions,
+                              model=req.model)
+    except Exception as exc:  # noqa: BLE001 - surface planning failures (bad repo path, bad JSON) to the UI
+        raise HTTPException(400, f"Planning failed: {exc}")
+    return {"trees": trees}
+
+
+@app.post("/jobs")
+def submit_job(req: JobRequest):
+    config = {"block_instructions": req.block_instructions}
+    plan_data = [t.model_dump() for t in req.plan]
+    job_id = store.create_job(req.prompt, req.repo_path, config, plan_data,
+                               max_cost=req.max_cost, gate_caps=req.gate_caps, models=req.models)
+    threading.Thread(target=run_job, args=(job_id,), daemon=True).start()
+    return {"job_id": job_id}
+
+
+@app.get("/jobs")
+def get_jobs():
+    return store.list_jobs()
+
+
+@app.get("/jobs/{job_id}")
+def get_job(job_id: str):
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    return job
+
+
+@app.post("/jobs/{job_id}/stop")
+def stop_job(job_id: str):
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    store.request_stop(job_id)
+    return {"ok": True}
+
+
+@app.post("/jobs/{job_id}/resume")
+def resume(job_id: str, req: ResumeRequest):
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    if job["status"] != "stuck":
+        raise HTTPException(400, f"job is not stuck (status={job['status']}) — nothing to resume")
+    threading.Thread(target=resume_job, args=(job_id, req.instructions), daemon=True).start()
+    return {"ok": True}
+
+
+@app.post("/repos")
+def create_repo(req: CreateRepoRequest):
+    """git-init a fresh repo at `path` so it's immediately usable as a job's target repo — a job
+    needs at least one commit to branch a worktree off of, which a bare `git init` alone doesn't give."""
+    if req.github:
+        raise HTTPException(400, "GitHub sync isn't built yet — create the repo locally for now, "
+                                  "you can add a remote and push it yourself afterward.")
+    try:
+        return init_repo(req.path)
+    except RuntimeError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/chat/start")
+def chat_start(req: ChatStartRequest):
+    return {"chat_id": chat.start_chat(req.repo_path)}
+
+
+@app.post("/chat/{chat_id}/message")
+def chat_message(chat_id: str, req: ChatMessageRequest):
+    try:
+        return {"reply": chat.send_message(chat_id, req.message)}
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    except Exception as exc:  # noqa: BLE001 - surface real OpenAI/API errors (rate limits, billing,
+        # network blips) as a readable message instead of an unhandled exception that the browser
+        # only ever sees as a raw connection failure ("Failed to fetch") with no explanation.
+        raise HTTPException(502, f"Chat call failed: {exc}")
+
+
+@app.post("/jobs/{job_id}/run")
+def run_app(job_id: str):
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "job not found")
+    project_path = job.get("job_wt_path") or job.get("repo_path")
+    if not project_path:
+        raise HTTPException(400, "job has no worktree to run yet")
+    try:
+        return runner.start_run(job_id, project_path)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.get("/jobs/{job_id}/run")
+def run_status(job_id: str):
+    return runner.get_run_status(job_id)
+
+
+@app.post("/jobs/{job_id}/run/stop")
+def stop_run_endpoint(job_id: str):
+    runner.stop_run(job_id)
+    return {"ok": True}
+
+
+@app.post("/run")
+def run_path(req: RunRequest):
+    """Same launcher as /jobs/{id}/run, but for the home-screen Run card — any local project, not
+    necessarily one the swarm built. runner.py's functions key on an arbitrary string id (it never
+    actually looks the id up in the jobs table), so a freshly minted uuid works exactly like a job_id
+    does — no changes needed there."""
+    run_id = str(uuid.uuid4())
+    try:
+        result = runner.start_run(run_id, req.path)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    result["run_id"] = run_id
+    return result
+
+
+@app.get("/run/{run_id}")
+def run_path_status(run_id: str):
+    return runner.get_run_status(run_id)
+
+
+@app.post("/run/{run_id}/stop")
+def stop_run_path(run_id: str):
+    runner.stop_run(run_id)
+    return {"ok": True}
