@@ -26,13 +26,19 @@ from orchestrator.llm_clients import (
 # OpenAI-provider gate only offers OPENAI_MODELS, a Claude-provider gate only CLAUDE_MODELS) and used
 # here as the fallback when a job doesn't specify an override for a gate type.
 PROVIDERS = {
-    "planner": "claude", "team_lead": "openai", "dev": "openai",
+    "planner": "claude", "design": "openai", "team_lead": "openai", "dev": "openai",
     "check_and_test": "openai", "auditor": "claude",
 }
 DEFAULT_MODELS = {
-    "planner": CLAUDE_MODEL, "team_lead": OPENAI_PRO_MODEL, "dev": OPENAI_FLASH_MODEL,
-    "check_and_test": OPENAI_FLASH_MODEL, "auditor": CLAUDE_MODEL,
+    "planner": CLAUDE_MODEL, "design": OPENAI_PRO_MODEL, "team_lead": OPENAI_PRO_MODEL,
+    "dev": OPENAI_FLASH_MODEL, "check_and_test": OPENAI_FLASH_MODEL, "auditor": CLAUDE_MODEL,
 }
+# The two optional SDLC phases the planner can staff per tree, on top of the always-on floor
+# (implementation + check_and_test) — see PLAN_PROJECT_SYSTEM. "review" is the existing team-lead
+# quality gate; kept toggleable too since not every tree benefits from a UX pass, but the planner
+# is steered to default it on since it's cheap. "design" is genuinely new: a short brief written and
+# threaded into every dev's prompt before any code gets written.
+TREE_PHASES = ["design", "review"]
 # Curated, cost.py-priced selection shown in each gate's model dropdown — not every model OpenAI/
 # Anthropic offer, just ones sensible for this kind of agentic coding work.
 CLAUDE_MODELS = ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"]
@@ -51,13 +57,34 @@ of the same planning task, scoped to that tree), and decide how many developers 
 actually needs — most trees need only 1; use 2-3 only when a tree's own subtasks are genuinely
 independent of each other and can be safely parallelized.
 
+Every tree always gets implementation (the dev agent(s)) and a final check-and-test pass — those are
+never optional, that's the floor of what "done" means here. On top of that floor, choose which of two
+extra SDLC phases this specific tree actually needs, and put them in "phases":
+- "review": a team-lead quality gate (UX/accuracy) after implementation, before check-and-test. Cheap
+  and broadly useful — default this ON for most trees, only drop it for genuinely trivial/mechanical
+  work (e.g. a one-line config change) where an extra review pass adds nothing.
+- "design": a short design brief (approach, key files/interfaces, tradeoffs) written before any code,
+  handed to every developer on the tree as context. Worth it for new features, unfamiliar territory, or
+  anything with real architectural decisions to make (data model, module boundaries, cross-file
+  interfaces). Skip it for small, well-understood changes — the design doc would just restate the task.
+Match the phase list to the tree's actual size and risk — a small tree should end up with just
+["review"] or even [], while a large/risky/novel tree should get ["design", "review"]. Don't include
+phases out of habit; every phase you add costs real time and money.
+
 Critical: give each tree an explicit, non-overlapping scope (specific files/directories/concerns) so
 no two trees ever need to touch the same file — this is what keeps the eventual cross-tree merge cheap
 and safe. State each tree's scope explicitly in its summary.
 
 Respond ONLY with JSON:
 {"trees": [{"summary": "one line: what this tree owns and its scope",
-            "subtasks": [{"task": "...", "acceptance": "..."}], "num_devs": 1}]}"""
+            "subtasks": [{"task": "...", "acceptance": "..."}], "num_devs": 1,
+            "phases": ["review"]}]}"""
+
+TEAM_LEAD_DESIGN_SYSTEM = """You are the engineering team lead writing a short design brief for your
+developers before any code gets written. Given this tree's subtasks, decide the concrete approach:
+which files/modules are involved, any new interfaces or data shapes, and the key tradeoffs you're
+making and why. Keep it tight and actionable — this gets handed directly to the developers as context,
+not filed away. No JSON, no headers — just the brief as plain prose, 3-8 sentences."""
 
 TEAM_LEAD_PLAN_SYSTEM = """You are the engineering team lead for a small dev team of {n} developers.
 You've been given a subtask list (each with an acceptance criterion) from your manager. Assign each
@@ -179,10 +206,23 @@ def plan_project(prompt: str, repo_listing: str, lessons: str = "", instructions
     return safe_json_load(text)["trees"]
 
 
-def team_lead_plan(subtasks: list, num_devs: int, instructions: str = "",
+def team_lead_design(subtasks: list, instructions: str = "",
+                      model: str = DEFAULT_MODELS["design"]) -> str:
+    """Optional pre-implementation phase (only run when the planner put "design" in a tree's phases).
+    Returns a short brief threaded into team_lead_plan and every dev's prompt as extra context — not
+    itself gated/approved, kept lightweight on purpose."""
+    prompt = f"Subtasks:\n{subtasks}"
+    if instructions:
+        prompt += f"\n\nUser instructions for you specifically:\n{instructions}"
+    return call_openai(TEAM_LEAD_DESIGN_SYSTEM, prompt, model=model).strip()
+
+
+def team_lead_plan(subtasks: list, num_devs: int, instructions: str = "", design_notes: str = "",
                     model: str = DEFAULT_MODELS["team_lead"]) -> list[dict]:
     system = TEAM_LEAD_PLAN_SYSTEM.format(n=num_devs)
     prompt = f"Subtasks:\n{subtasks}"
+    if design_notes:
+        prompt += f"\n\nDesign brief for this tree (written before assignment, hand its constraints to devs):\n{design_notes}"
     if instructions:
         prompt += f"\n\nUser instructions for you specifically:\n{instructions}"
     text = call_openai(system, prompt, model=model)
@@ -199,9 +239,12 @@ def team_lead_revise(rejection_source: str, notes: str, subtasks: list, num_devs
 
 
 def run_dev_agent(developer_id: int, tasks: list, worktree_path: str, extra_instructions: str = "",
-                   lessons: str = "", report=None, model: str = DEFAULT_MODELS["dev"]) -> dict:
+                   lessons: str = "", design_notes: str = "", report=None,
+                   model: str = DEFAULT_MODELS["dev"]) -> dict:
     tools = WorkspaceTools(worktree_path, report=report)
     prompt = "Your tasks:\n" + "\n".join(f"- {t}" for t in tasks)
+    if design_notes:
+        prompt += f"\n\nDesign brief for this tree (follow its approach):\n{design_notes}"
     if lessons:
         prompt += f"\n\nLessons from past runs on this repo (avoid repeating these mistakes):\n{lessons}"
     if extra_instructions:

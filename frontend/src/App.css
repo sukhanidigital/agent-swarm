@@ -971,6 +971,18 @@ body::before {
   width: auto;
 }
 
+.phase-toggle-row {
+  display: flex;
+  gap: 1.1rem;
+  margin-top: 0.35rem;
+}
+.phase-toggle {
+  cursor: pointer;
+}
+.phase-hint {
+  margin-top: 0.35rem !important;
+}
+
 /* ---- advisory chat ---- */
 
 .chat-log {

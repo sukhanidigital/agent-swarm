@@ -1,11 +1,16 @@
 """v4 tree pipeline. A job is planned once, pre-run (see agents.plan_project, called from the /plan
 API endpoint before a job even exists), into 1-4 independent "trees" — each with its own scope,
-subtasks, and dev count. Trees run sequentially (devs *within* a tree still run in parallel); each
-tree has its own local gate loop: Team Lead assign -> dev round -> Team Lead quality gate ->
-check_and_test (combined Checker+Tester), restarting from the quality gate on any local rejection.
-Once a tree's local gates approve, it's merged into the job branch and the pipeline moves to the next
-tree. After every tree has merged, one top-level pass runs: Summarizer -> Claude Auditor. If the
-auditor rejects, a coordinator (the team-lead-tier model) decides which tree(s) are actually at fault and only those
+subtasks, dev count, and *phases*. Trees run sequentially (devs *within* a tree still run in
+parallel). Implementation (the dev round) and check_and_test are the always-on floor every tree gets;
+each tree's plan also carries a "phases" list picking which of two optional SDLC phases it needs on
+top of that floor — "design" (a brief written before any code, threaded into every dev's prompt) and
+"review" (the Team Lead quality gate) — sized to the tree's actual complexity by the planner rather
+than fixed for every tree (see agents.PLAN_PROJECT_SYSTEM/TREE_PHASES). A tree's local loop is
+therefore: [design] -> Team Lead assign -> dev round -> [Team Lead quality gate] -> check_and_test,
+restarting from after design (design itself isn't re-run) on any local rejection. Once a tree's local
+gates approve, it's merged into the job branch and the pipeline moves to the next tree. After every
+tree has merged, one top-level pass runs: Summarizer -> Claude Auditor. If the auditor rejects, a
+coordinator (the team-lead-tier model) decides which tree(s) are actually at fault and only those
 re-run (via run_tree's `initial_notes`, which skips straight to a revision round) before re-merging
 and re-auditing — never blindly re-running every tree.
 
@@ -28,6 +33,7 @@ from orchestrator.agents import (
     long_summarize,
     resolve_merge_conflict,
     run_dev_agent,
+    team_lead_design,
     team_lead_plan,
     team_lead_quality_gate,
     team_lead_revise,
@@ -121,7 +127,7 @@ def _build_context(job_id: str, prompt: str, repo_path: str, config: dict, max_c
         return False
 
     def run_dev_round(block_prefix: str, assignments: list, base_branch: str, base_wt_path: str,
-                       lessons: str, round_id: str):
+                       lessons: str, round_id: str, design_notes: str = ""):
         """Run each assigned dev in its own worktree branched off base_branch, then merge every dev
         branch back into base_wt_path. block_prefix e.g. "tree_1_dev_" -> dev block "tree_1_dev_2"."""
         def do_one(assignment):
@@ -134,7 +140,7 @@ def _build_context(job_id: str, prompt: str, repo_path: str, config: dict, max_c
             try:
                 dev_wt = create_branch_worktree(repo_path, base_branch, f"{block}-{round_id}", WORKTREES_ROOT)
                 result = run_dev_agent(dev_id, assignment["tasks"], dev_wt["worktree_path"], extra, lessons,
-                                        report=make_reporter(block), model=models_cfg["dev"])
+                                        design_notes, report=make_reporter(block), model=models_cfg["dev"])
                 commit_all(dev_wt["worktree_path"], f"{block} ({round_id}): {assignment['tasks']}")
             except Exception as exc:  # noqa: BLE001 - one dev's transient failure (git hiccup, API
                 # blip, subprocess error) must not take the whole job down with an opaque thread trace
@@ -191,8 +197,14 @@ def run_tree(ctx: dict, job_id: str, repo_path: str, tree_id: int, tree_plan: di
     block_instructions, models = ctx["block_instructions"], ctx["models"]
 
     tl_block, cnt_block, dev_prefix = f"tree_{tree_id}_team_lead", f"tree_{tree_id}_check_and_test", f"tree_{tree_id}_dev_"
+    design_block = f"tree_{tree_id}_design"
     subtasks = tree_plan["subtasks"]
     num_devs = max(1, min(3, tree_plan.get("num_devs", 1)))
+    # Implementation + check_and_test are the always-on floor; "design" and "review" are the two
+    # optional SDLC phases the planner staffs per tree (see agents.PLAN_PROJECT_SYSTEM/TREE_PHASES).
+    # Missing "phases" (older plans, or a plan built before this existed) defaults to ["review"] —
+    # today's baseline behavior, so nothing regresses.
+    phases = set(tree_plan.get("phases", ["review"]))
 
     # Unique suffix per call: a stuck tree's abandoned worktree/branch is deliberately never deleted
     # (kept for inspection), so a resume or coordinator re-visit of the same tree_id must not collide
@@ -207,36 +219,46 @@ def run_tree(ctx: dict, job_id: str, repo_path: str, tree_id: int, tree_plan: di
         round_counter[0] += 1
         return f"r{round_counter[0]}"
 
+    design_notes = ""
+    if "design" in phases:
+        start_block(design_block, "writing design brief")
+        log(f"Tree {tree_id}: writing design brief...")
+        design_notes = team_lead_design(subtasks, block_instructions.get(design_block, ""), model=models["design"])
+        finish_block(design_block, design_notes[:120])
+        log(f"Tree {tree_id} design brief: {design_notes}")
+
     if initial_notes is None:
         start_block(tl_block, f"assigning {len(subtasks)} subtask(s) to {num_devs} developer(s)")
         log(f"Tree {tree_id}: team lead assigning {len(subtasks)} subtask(s) to {num_devs} developer(s)...")
-        assignments = team_lead_plan(subtasks, num_devs, block_instructions.get(tl_block, ""), model=models["team_lead"])
+        assignments = team_lead_plan(subtasks, num_devs, block_instructions.get(tl_block, ""),
+                                      design_notes, model=models["team_lead"])
         finish_block(tl_block, "assignments made")
     else:
         log(f"Tree {tree_id}: revising with — {initial_notes}")
         assignments = team_lead_revise("coordinator", initial_notes, subtasks, num_devs, model=models["team_lead"])
-    run_dev_round(dev_prefix, assignments, tree_branch, tree_wt_path, lessons, next_round_id())
+    run_dev_round(dev_prefix, assignments, tree_branch, tree_wt_path, lessons, next_round_id(), design_notes)
 
     while True:
         if ctx["check_stop"]() or ctx["check_budget"]():
             return False
 
-        ctx["set_gate"](tl_block)
-        start_block(tl_block, "quality gate: reviewing UX/accuracy")
-        diff = diff_against(tree_wt_path, tree_base_sha)
-        ql = team_lead_quality_gate(subtasks, diff, tree_wt_path, block_instructions.get(tl_block, ""),
-                                     report=make_reporter(tl_block), model=models["team_lead"])
-        commit_all(tree_wt_path, f"tree {tree_id}: quality gate pass")
-        log(f"Tree {tree_id} team lead verdict: {ql['verdict']} — {ql['notes']}")
-        memory.log_gate_verdict(job_id, repo_path, tl_block, round_counter[0], ql["verdict"], ql["notes"])
-        if ql["verdict"] != "approve":
-            finish_block(tl_block, f"revise: {ql['notes'][:100]}")
-            if bump(tl_block, "team_lead"):
-                return False
-            assignments = team_lead_revise("team lead (quality)", ql["notes"], subtasks, num_devs, model=models["team_lead"])
-            run_dev_round(dev_prefix, assignments, tree_branch, tree_wt_path, lessons, next_round_id())
-            continue
-        finish_block(tl_block, "approved")
+        if "review" in phases:
+            ctx["set_gate"](tl_block)
+            start_block(tl_block, "quality gate: reviewing UX/accuracy")
+            diff = diff_against(tree_wt_path, tree_base_sha)
+            ql = team_lead_quality_gate(subtasks, diff, tree_wt_path, block_instructions.get(tl_block, ""),
+                                         report=make_reporter(tl_block), model=models["team_lead"])
+            commit_all(tree_wt_path, f"tree {tree_id}: quality gate pass")
+            log(f"Tree {tree_id} team lead verdict: {ql['verdict']} — {ql['notes']}")
+            memory.log_gate_verdict(job_id, repo_path, tl_block, round_counter[0], ql["verdict"], ql["notes"])
+            if ql["verdict"] != "approve":
+                finish_block(tl_block, f"revise: {ql['notes'][:100]}")
+                if bump(tl_block, "team_lead"):
+                    return False
+                assignments = team_lead_revise("team lead (quality)", ql["notes"], subtasks, num_devs, model=models["team_lead"])
+                run_dev_round(dev_prefix, assignments, tree_branch, tree_wt_path, lessons, next_round_id(), design_notes)
+                continue
+            finish_block(tl_block, "approved")
 
         if ctx["check_stop"]() or ctx["check_budget"]():
             return False
@@ -253,7 +275,7 @@ def run_tree(ctx: dict, job_id: str, repo_path: str, tree_id: int, tree_plan: di
             if bump(cnt_block, "check_and_test"):
                 return False
             assignments = team_lead_revise("checker/tester", cnt["notes"], subtasks, num_devs, model=models["team_lead"])
-            run_dev_round(dev_prefix, assignments, tree_branch, tree_wt_path, lessons, next_round_id())
+            run_dev_round(dev_prefix, assignments, tree_branch, tree_wt_path, lessons, next_round_id(), design_notes)
             continue
         finish_block(cnt_block, "approved")
         break

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from orchestrator import chat, runner, store
-from orchestrator.agents import CLAUDE_MODELS, DEFAULT_MODELS, OPENAI_MODELS, PROVIDERS, plan_project
+from orchestrator.agents import CLAUDE_MODELS, DEFAULT_MODELS, OPENAI_MODELS, PROVIDERS, TREE_PHASES, plan_project
 from orchestrator.git_tools import init_repo
 from orchestrator.pipeline import repo_listing, resume_job, run_job
 
@@ -33,6 +33,7 @@ class Tree(BaseModel):
     summary: str
     subtasks: list[TreeSubtask]
     num_devs: int = 1
+    phases: list[str] = ["review"]  # subset of agents.TREE_PHASES ("design", "review") — see PLAN_PROJECT_SYSTEM
 
 
 class JobRequest(BaseModel):
@@ -74,6 +75,7 @@ def list_models():
     return {
         "providers": PROVIDERS, "default_models": DEFAULT_MODELS,
         "claude_models": CLAUDE_MODELS, "openai_models": OPENAI_MODELS,
+        "tree_phases": TREE_PHASES,
     }
 
 

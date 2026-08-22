@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import NodeBox from "./components/NodeBox";
 import Modal from "./components/Modal";
 import Icon from "./components/Icon";
-import { GATE_MODELS, GATE_ICONS, GATE_DESCRIPTIONS, CAPPED_GATE_TYPES } from "./roles";
+import { GATE_MODELS, GATE_ICONS, GATE_DESCRIPTIONS, CAPPED_GATE_TYPES, PHASE_LABELS } from "./roles";
 import {
   planProject, submitJob, getJob, stopJob, resumeJob,
   createRepo, startChat, sendChatMessage, startRun, getRunStatus, stopRun,
@@ -25,6 +25,7 @@ function parseBlockKey(block) {
   const treeMatch = block.match(/^tree_(\d+)_(.+)$/);
   if (!treeMatch) return { gateType: block, label: block };
   const [, treeId, rest] = treeMatch;
+  if (rest === "design") return { gateType: "design", label: `Tree ${treeId} — Design` };
   if (rest === "team_lead") return { gateType: "team_lead", label: `Tree ${treeId} — Team Lead` };
   if (rest === "check_and_test") return { gateType: "check_and_test", label: `Tree ${treeId} — Check & Test` };
   const devMatch = rest.match(/^dev_(\d+)$/);
@@ -205,7 +206,7 @@ function App() {
 
   function addTree() {
     setPlan((prev) => (prev.length >= 4 ? prev : [...prev,
-      { summary: "New tree", subtasks: [{ task: "", acceptance: "" }], num_devs: 1 }]));
+      { summary: "New tree", subtasks: [{ task: "", acceptance: "" }], num_devs: 1, phases: ["review"] }]));
   }
 
   function removeTree(index) {
@@ -399,12 +400,23 @@ function App() {
 }
 
 function TreeColumn({ treeId, treePlan, blockStatus, onInfoClick }) {
+  const designBlock = `tree_${treeId}_design`;
   const tlBlock = `tree_${treeId}_team_lead`;
   const cntBlock = `tree_${treeId}_check_and_test`;
   const numDevs = treePlan?.num_devs || 1;
+  const phases = treePlan?.phases || [];
+  const hasDesign = phases.includes("design");
   return (
     <div className="tree-column">
       <div className="tree-column-label">Tree {treeId}</div>
+      {hasDesign && (
+        <>
+          <NodeBox compact title="Design" subtitle={GATE_MODELS.design} icon={GATE_ICONS.design}
+            state={blockStatus[designBlock]?.state} activity={blockStatus[designBlock]?.activity}
+            pct={blockStatus[designBlock]?.pct} onInfoClick={() => onInfoClick(designBlock)} />
+          <Connector small />
+        </>
+      )}
       <NodeBox compact title="Team Lead" subtitle={GATE_MODELS.team_lead} icon={GATE_ICONS.team_lead}
         state={blockStatus[tlBlock]?.state} activity={blockStatus[tlBlock]?.activity}
         pct={blockStatus[tlBlock]?.pct} onInfoClick={() => onInfoClick(tlBlock)} />
@@ -650,6 +662,25 @@ function PlanReview({ plan, maxCost, setMaxCost, startError, onUpdateTree, onUpd
           <label>Developers: {tree.num_devs}</label>
           <input type="range" min="1" max="3" value={tree.num_devs}
             onChange={(e) => onUpdateTree(i, { num_devs: Number(e.target.value) })} />
+          <label>SDLC phases for this tree</label>
+          <div className="phase-toggle-row">
+            {Object.entries(PHASE_LABELS).map(([key, label]) => {
+              const checked = (tree.phases || []).includes(key);
+              return (
+                <label key={key} className="checkbox-label phase-toggle">
+                  <input type="checkbox" checked={checked} onChange={(e) => {
+                    const phases = e.target.checked
+                      ? [...(tree.phases || []), key]
+                      : (tree.phases || []).filter((p) => p !== key);
+                    onUpdateTree(i, { phases });
+                  }} />
+                  {label}
+                </label>
+              );
+            })}
+          </div>
+          <p className="role-desc phase-hint">Implementation and Check &amp; Test always run — these
+            add an optional design brief and/or a team-lead review pass.</p>
           <label>Subtasks</label>
           {tree.subtasks.map((s, j) => (
             <div className="subtask-row" key={j}>
