@@ -9,6 +9,8 @@ const PATHS = {
   "check-shield": "M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6zM9 12l2 2 4-4",
   stop: "M6 6h12v12H6z",
   info: "M12 22a10 10 0 100-20 10 10 0 000 20zM12 11v6M12 7v.01",
+  eye: "M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z M12 15a3 3 0 100-6 3 3 0 000 6z",
+  plus: "M12 5v14M5 12h14",
 };
 
 export default function Icon({ name, size = 18, className = "" }) {

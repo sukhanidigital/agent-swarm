@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import NodeBox from "./components/NodeBox";
 import Modal from "./components/Modal";
 import Icon from "./components/Icon";
-import { GATE_MODELS, GATE_ICONS, GATE_DESCRIPTIONS, CAPPED_GATE_TYPES, PHASE_LABELS } from "./roles";
+import { GATE_MODELS, GATE_ICONS, GATE_DESCRIPTIONS, CAPPED_GATE_TYPES, PHASE_LABELS, AGENT_LIBRARY } from "./roles";
 import {
   planProject, submitJob, getJob, stopJob, resumeJob,
   createRepo, startChat, sendChatMessage, startRun, getRunStatus, stopRun,
@@ -66,6 +66,22 @@ function App() {
       // if this fails the model dropdowns just won't render — everything else still works
     });
   }, []);
+
+  // --- agent library + add/remove-agent wizard (stacked on top of the library, same pattern as
+  // create-repo stacking on top of Boot-up) ---
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [wizard, setWizard] = useState(null); // null = closed; else { agent, step, treeIndex, instructions, model, cap }
+
+  function startWizard(agent) {
+    setWizard({
+      agent,
+      step: 0,
+      treeIndex: plan && plan.length === 1 ? 0 : null,
+      instructions: "",
+      model: blockModels[agent.blockGateType] || modelConfig?.default_models?.[agent.blockGateType] || "",
+      cap: gateCaps[agent.blockGateType] ?? 5,
+    });
+  }
 
   // --- create-repo (stacked modal, doesn't close Boot-up) ---
   const [createRepoOpen, setCreateRepoOpen] = useState(false);
@@ -272,6 +288,9 @@ function App() {
     <div className="app">
       <div className={`hero${job ? "" : " hero-idle"}`}>
         <header className="app-header">
+          <button className="library-btn" onClick={() => setLibraryOpen(true)} aria-label="Agent Library">
+            <Icon name="briefcase" size={15} /> <span className="library-btn-label">Agent Library</span>
+          </button>
           <div className="brand"><Icon name="rocket" size={22} /> <span>Agent Swarm</span></div>
         </header>
 
@@ -382,6 +401,18 @@ function App() {
             onSubmit={handleCreateRepo}
           />
         </Modal>
+      )}
+
+      {libraryOpen && (
+        <AgentLibraryModal plan={plan} onClose={() => setLibraryOpen(false)} onStartWizard={startWizard} />
+      )}
+
+      {wizard && (
+        <AddAgentWizard
+          wizard={wizard} setWizard={setWizard} plan={plan} onUpdateTree={updateTree}
+          setBlockInstructions={setBlockInstructions} setBlockModels={setBlockModels} setGateCaps={setGateCaps}
+          modelConfig={modelConfig} onClose={() => setWizard(null)}
+        />
       )}
 
       {activeModal && activeModal !== "boot_up" && (
@@ -945,6 +976,174 @@ function HomeRunCard() {
         </>
       )}
     </div>
+  );
+}
+
+function AgentLibraryModal({ plan, onClose, onStartWizard }) {
+  const [expanded, setExpanded] = useState(null); // which bubble's description is expanded
+
+  return (
+    <Modal title="Agent Library" onClose={onClose}>
+      <p className="role-desc">Every agent in the pipeline. Planner, Team Lead, Developer, Check &amp;
+        Test, and Auditor always run. Design and Review are optional — add or remove either from a
+        specific tree.</p>
+      <div className="agent-library-grid">
+        {AGENT_LIBRARY.map((agent) => (
+          <div className="agent-bubble-wrap" key={agent.id}>
+            <div className={`agent-bubble ${agent.mandatory ? "agent-bubble-mandatory" : "agent-bubble-optional"}`}>
+              <button className="agent-bubble-info" onClick={() => setExpanded(expanded === agent.id ? null : agent.id)}
+                aria-label={`${agent.label} info`}>
+                <Icon name="info" size={13} />
+              </button>
+              <div className="agent-bubble-icon"><Icon name={agent.icon} size={22} /></div>
+              <div className="agent-bubble-label">{agent.label}</div>
+              <div className="agent-bubble-model">{agent.model}</div>
+              {agent.mandatory ? (
+                <span className="agent-bubble-badge">Always on</span>
+              ) : (
+                <button className="btn-link agent-bubble-add" disabled={!plan}
+                  onClick={() => onStartWizard(agent)}>
+                  + Add / remove
+                </button>
+              )}
+            </div>
+            {expanded === agent.id && <p className="agent-bubble-desc">{agent.description}</p>}
+          </div>
+        ))}
+      </div>
+      {!plan && <p className="role-desc">Plan a run first (Boot-up) — adding or removing Design or
+        Review happens per tree, once trees exist to pick from.</p>}
+    </Modal>
+  );
+}
+
+const WIZARD_STEP_LABELS = ["Which tree?", "Where in the tree?", "Configure"];
+
+function wizardSequence(tree, highlightPhase) {
+  const phases = tree.phases || [];
+  const nodes = [
+    { key: "design", label: "Design", optional: true },
+    { key: "team_lead", label: "Team Lead", optional: false },
+    { key: "dev", label: `Dev ×${tree.num_devs || 1}`, optional: false },
+    { key: "review", label: "Review", optional: true },
+    { key: "check_and_test", label: "Check & Test", optional: false },
+  ];
+  return nodes
+    .filter((n) => !n.optional || phases.includes(n.key) || n.key === highlightPhase)
+    .map((n) => ({ ...n, highlight: n.key === highlightPhase }));
+}
+
+function AddAgentWizard({ wizard, setWizard, plan, onUpdateTree, setBlockInstructions, setBlockModels,
+  setGateCaps, modelConfig, onClose }) {
+  const { agent, step, treeIndex, instructions, model, cap } = wizard;
+  const tree = treeIndex != null ? plan[treeIndex] : null;
+  const alreadyIncluded = tree ? (tree.phases || []).includes(agent.phaseKey) : false;
+  const modelOptions = modelConfig?.providers?.[agent.blockGateType] === "claude"
+    ? modelConfig?.claude_models : modelConfig?.openai_models;
+
+  function patch(p) {
+    setWizard((prev) => ({ ...prev, ...p }));
+  }
+
+  function apply() {
+    const nextPhases = alreadyIncluded
+      ? (tree.phases || []).filter((p) => p !== agent.phaseKey)
+      : [...(tree.phases || []), agent.phaseKey];
+    onUpdateTree(treeIndex, { phases: nextPhases });
+    if (!alreadyIncluded) {
+      const block = agent.phaseKey === "design" ? `tree_${treeIndex + 1}_design` : `tree_${treeIndex + 1}_team_lead`;
+      if (instructions.trim()) setBlockInstructions((prev) => ({ ...prev, [block]: instructions.trim() }));
+      if (model) setBlockModels((prev) => ({ ...prev, [agent.blockGateType]: model }));
+      if (agent.blockGateType === "team_lead") {
+        setGateCaps((prev) => ({ ...prev, team_lead: Math.max(1, cap || 5) }));
+      }
+    }
+    setWizard(null);
+  }
+
+  return (
+    <Modal title={`${alreadyIncluded ? "Remove" : "Add"} ${agent.label}`} onClose={onClose}>
+      <div className="wizard-steps">
+        {WIZARD_STEP_LABELS.map((label, i) => (
+          <div key={label} className={`wizard-step-dot ${i === step ? "active" : ""} ${i < step ? "done" : ""}`}>
+            {i + 1}
+          </div>
+        ))}
+      </div>
+
+      <div className="wizard-viewport">
+      <div className="wizard-track" style={{ transform: `translateX(-${step * 100}%)` }}>
+        <div className="wizard-panel">
+          <p className="role-desc">Which tree should get {agent.label.toLowerCase()}?</p>
+          {plan.map((t, i) => (
+            <label key={i} className="wizard-tree-option">
+              <input type="radio" name="wizard-tree" checked={treeIndex === i} onChange={() => patch({ treeIndex: i })} />
+              <span>Tree {i + 1} — {t.summary}</span>
+              {(t.phases || []).includes(agent.phaseKey) && <span className="wizard-tag">already included</span>}
+            </label>
+          ))}
+        </div>
+
+        <div className="wizard-panel">
+          {tree && (
+            <>
+              <p className="role-desc">
+                {agent.phaseKey === "design"
+                  ? "Design always runs first in a tree — before Team Lead assigns any work."
+                  : "Review always runs after implementation, right before Check & Test."}
+                {" "}That's fixed by the pipeline, not something this step can move — this just shows
+                where it lands in Tree {treeIndex + 1}'s sequence.
+              </p>
+              <div className="wizard-sequence">
+                {wizardSequence(tree, agent.phaseKey).map((node) => (
+                  <span key={node.key} className={`wizard-seq-node ${node.highlight ? "wizard-seq-highlight" : ""}`}>
+                    {node.label}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="wizard-panel">
+          {!alreadyIncluded ? (
+            <>
+              <label>Instructions for this phase specifically (optional)</label>
+              <textarea value={instructions} onChange={(e) => patch({ instructions: e.target.value })}
+                placeholder="e.g. Focus the design brief on the data model" />
+              {modelOptions && modelOptions.length > 0 && (
+                <>
+                  <label>Model (shared across every tree's {agent.label})</label>
+                  <select value={model} onChange={(e) => patch({ model: e.target.value })}>
+                    {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </>
+              )}
+              {agent.blockGateType === "team_lead" && (
+                <>
+                  <label>Max retries before stuck (shared across every tree's Review)</label>
+                  <input type="number" min="1" max="20" value={cap} onChange={(e) => patch({ cap: Number(e.target.value) })} />
+                </>
+              )}
+            </>
+          ) : (
+            <p className="role-desc">This removes {agent.label} from Tree {treeIndex + 1} only — other
+              trees that have it keep it. Its saved instructions/model stick around in case you add it
+              back later.</p>
+          )}
+        </div>
+      </div>
+      </div>
+
+      <div className="wizard-actions">
+        <button className="btn-secondary" disabled={step === 0} onClick={() => patch({ step: step - 1 })}>Back</button>
+        {step < 2 ? (
+          <button className="btn-primary" disabled={treeIndex === null} onClick={() => patch({ step: step + 1 })}>Next</button>
+        ) : (
+          <button className="btn-primary" onClick={apply}>{alreadyIncluded ? "Remove" : "Add"} {agent.label}</button>
+        )}
+      </div>
+    </Modal>
   );
 }
 

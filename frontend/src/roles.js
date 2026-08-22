@@ -52,3 +52,31 @@ export const CAPPED_GATE_TYPES = ["team_lead", "check_and_test", "auditor"];
 export const PHASE_LABELS = {
   design: "Design", review: "Review",
 };
+
+// Every agent in the pipeline, for the Agent Library modal. Distinct from GATE_MODELS/ICONS/
+// DESCRIPTIONS above in one way: "review" gets its own library entry even though mechanically it's
+// still the team_lead block (same instructions/model/cap) — the library is about which *phases* run,
+// not which block runs them. `phaseKey` is set only for the two toggleable phases (matches
+// tree.phases entries); `blockGateType` is which gate type's instructions/model/cap a phase's config
+// step actually writes to (review writes into team_lead's, since there's no separate review block).
+export const AGENT_LIBRARY = [
+  { id: "planner", label: "Planner", icon: "compass", model: "Claude", mandatory: true,
+    description: GATE_DESCRIPTIONS.planner },
+  { id: "design", label: "Design", icon: "flask", model: "OpenAI", mandatory: false,
+    phaseKey: "design", blockGateType: "design",
+    description: GATE_DESCRIPTIONS.design },
+  { id: "team_lead", label: "Team Lead", icon: "briefcase", model: "OpenAI", mandatory: true,
+    description: "Assigns this tree's subtasks to its developers and merges their branches " +
+      "together once they're done. Always runs. Restricted to OpenAI models." },
+  { id: "dev", label: "Developer", icon: "code", model: "OpenAI", mandatory: true,
+    description: GATE_DESCRIPTIONS.dev },
+  { id: "review", label: "Review", icon: "eye", model: "OpenAI", mandatory: false,
+    phaseKey: "review", blockGateType: "team_lead",
+    description: "A team-lead quality gate focused purely on UX and accuracy — not scope, " +
+      "security, or formatting — run after implementation, before Check & Test. Configurable " +
+      "retry cap. Restricted to OpenAI models." },
+  { id: "check_and_test", label: "Check & Test", icon: "shield", model: "OpenAI", mandatory: true,
+    description: GATE_DESCRIPTIONS.check_and_test },
+  { id: "auditor", label: "Auditor", icon: "check-shield", model: "Claude", mandatory: true,
+    description: GATE_DESCRIPTIONS.auditor },
+];
