@@ -837,6 +837,7 @@ body::before {
   border-color: var(--accent);
 }
 .agent-bubble-desc {
+  grid-column: 1 / -1;
   color: var(--muted);
   font-size: 0.85rem;
   line-height: 1.6;
@@ -844,7 +845,7 @@ body::before {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 0.85rem 1rem;
-  margin: 1rem 0 0;
+  margin: 0;
 }
 .agent-bubble-desc strong {
   color: var(--ink);

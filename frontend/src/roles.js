@@ -53,30 +53,49 @@ export const PHASE_LABELS = {
   design: "Design", review: "Review",
 };
 
-// Every agent in the pipeline, for the Agent Library modal. Distinct from GATE_MODELS/ICONS/
-// DESCRIPTIONS above in one way: "review" gets its own library entry even though mechanically it's
-// still the team_lead block (same instructions/model/cap) — the library is about which *phases* run,
-// not which block runs them. `phaseKey` is set only for the two toggleable phases (matches
-// tree.phases entries); `blockGateType` is which gate type's instructions/model/cap a phase's config
-// step actually writes to (review writes into team_lead's, since there's no separate review block).
+// Every agent in the pipeline, for the Agent Library modal — non-removable ones first, then the two
+// dynamic (planner-staffed, per-tree) ones last. Distinct from GATE_MODELS/ICONS/DESCRIPTIONS above
+// in one way: several of these get their own library entry even though mechanically they share a
+// block with another entry — e.g. "Scope Checker" and "Tester & Checker" are both really the
+// check_and_test block (it's one combined LLM pass under the hood), and "Analysis" is really part of
+// the Planner's single call. The library is about making every distinct *responsibility* legible, not
+// a 1:1 map of backend calls — but every description says so plainly rather than implying a separate
+// call that doesn't exist. `phaseKey` is set only on the two toggleable phases (matches tree.phases
+// entries); `blockGateType` is which gate type's instructions/model/cap a phase's config step actually
+// writes to (review writes into team_lead's, since there's no separate review block).
 export const AGENT_LIBRARY = [
   { id: "planner", label: "Planner", icon: "compass", model: "Claude", mandatory: true,
     description: GATE_DESCRIPTIONS.planner },
+  { id: "analysis", label: "Analysis", icon: "search", model: "Claude", mandatory: true,
+    description: "Breaks your prompt down to what's actually being asked — requirements, edge " +
+      "cases, implicit constraints — before the Planner turns that into trees and subtasks. Folded " +
+      "into the Planner's single call today rather than a separate pass, but it's the first thing " +
+      "that happens conceptually. Restricted to Claude models." },
+  { id: "team_lead", label: "Development Team Lead", icon: "briefcase", model: "OpenAI", mandatory: true,
+    description: "Assigns this tree's subtasks to its developers and merges their branches " +
+      "together once they're done. Scoped purely to coordinating development work on a tree — not " +
+      "project-level planning (that's the Planner) and not code review (that's Review). Always " +
+      "runs. Restricted to OpenAI models." },
+  { id: "dev", label: "Developer", icon: "code", model: "OpenAI", mandatory: true,
+    description: GATE_DESCRIPTIONS.dev },
+  { id: "scope_checker", label: "Scope Checker", icon: "target", model: "OpenAI", mandatory: true,
+    description: "Flags scope creep — work that drifts outside a tree's assigned subtasks. Runs as " +
+      "part of the combined Check & Test pass below rather than its own separate call. Always runs. " +
+      "Restricted to OpenAI models." },
+  { id: "check_and_test", label: "Tester & Checker", icon: "shield", model: "OpenAI", mandatory: true,
+    description: GATE_DESCRIPTIONS.check_and_test },
+  { id: "tree_merge", label: "Tree Merge", icon: "merge", model: "Git", mandatory: true,
+    description: "Merges a tree's dev branches together once implementation's done, and later " +
+      "merges each approved tree into the job branch. Plain git — not an LLM call, so no model or " +
+      "retry cap. Always runs." },
+  { id: "auditor", label: "Auditor", icon: "check-shield", model: "Claude", mandatory: true,
+    description: GATE_DESCRIPTIONS.auditor },
   { id: "design", label: "Design", icon: "flask", model: "OpenAI", mandatory: false,
     phaseKey: "design", blockGateType: "design",
     description: GATE_DESCRIPTIONS.design },
-  { id: "team_lead", label: "Team Lead", icon: "briefcase", model: "OpenAI", mandatory: true,
-    description: "Assigns this tree's subtasks to its developers and merges their branches " +
-      "together once they're done. Always runs. Restricted to OpenAI models." },
-  { id: "dev", label: "Developer", icon: "code", model: "OpenAI", mandatory: true,
-    description: GATE_DESCRIPTIONS.dev },
   { id: "review", label: "Review", icon: "eye", model: "OpenAI", mandatory: false,
     phaseKey: "review", blockGateType: "team_lead",
     description: "A team-lead quality gate focused purely on UX and accuracy — not scope, " +
       "security, or formatting — run after implementation, before Check & Test. Configurable " +
       "retry cap. Restricted to OpenAI models." },
-  { id: "check_and_test", label: "Check & Test", icon: "shield", model: "OpenAI", mandatory: true,
-    description: GATE_DESCRIPTIONS.check_and_test },
-  { id: "auditor", label: "Auditor", icon: "check-shield", model: "Claude", mandatory: true,
-    description: GATE_DESCRIPTIONS.auditor },
 ];

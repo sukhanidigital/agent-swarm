@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import NodeBox from "./components/NodeBox";
 import Modal from "./components/Modal";
 import Icon from "./components/Icon";
@@ -984,13 +984,16 @@ function AgentLibraryModal({ plan, onClose, onStartWizard }) {
 
   return (
     <Modal title="Agent Library" onClose={onClose}>
-      <p className="role-desc">Every agent in the pipeline. Planner, Team Lead, Developer, Check &amp;
-        Test, and Auditor always run. Design and Review are optional — add or remove either from a
-        specific tree.</p>
+      <p className="role-desc">Every agent in the pipeline, non-removable ones first. Design and
+        Review are the two dynamic ones — add or remove either from a specific tree.</p>
       <div className="agent-library-grid">
         {AGENT_LIBRARY.map((agent) => (
-          <div className="agent-bubble-wrap" key={agent.id}>
-            <div className={`agent-bubble ${agent.mandatory ? "agent-bubble-mandatory" : "agent-bubble-optional"}`}>
+          // Fragment, not a wrapper div: the description (when open) is a sibling grid item placed
+          // right after this bubble in DOM order, so CSS grid auto-flow starts a new full-width row
+          // right there — directly under this bubble's row — instead of it being trapped inside the
+          // bubble's own (narrow) column, or all descriptions being dumped below the entire grid.
+          <Fragment key={agent.id}>
+            <div className={`agent-bubble ${agent.mandatory ? "agent-bubble-mandatory" : "agent-bubble-optional"} ${expanded === agent.id ? "agent-bubble-active" : ""}`}>
               <button className="agent-bubble-info" onClick={() => setExpanded(expanded === agent.id ? null : agent.id)}
                 aria-label={`${agent.label} info`}>
                 <Icon name="info" size={13} />
@@ -1007,8 +1010,10 @@ function AgentLibraryModal({ plan, onClose, onStartWizard }) {
                 </button>
               )}
             </div>
-            {expanded === agent.id && <p className="agent-bubble-desc">{agent.description}</p>}
-          </div>
+            {expanded === agent.id && (
+              <p className="agent-bubble-desc"><strong>{agent.label}: </strong>{agent.description}</p>
+            )}
+          </Fragment>
         ))}
       </div>
       {!plan && <p className="role-desc">Plan a run first (Boot-up) — adding or removing Design or
