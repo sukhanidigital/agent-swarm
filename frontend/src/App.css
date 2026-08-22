@@ -763,7 +763,11 @@ body::before {
 .agent-bubble {
   position: relative;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  /* Flat bottom, always — not just on the active bubble. This is what actually fixes the mismatch:
+     whichever bubble in a row gets expanded, its flat-bottomed row-mates already line up cleanly
+     with the description's flat top, instead of a round corner sitting oddly flush against a flat
+     edge on whichever side wasn't the one clicked. */
+  border-radius: 18px 18px 0 0;
   background: var(--glass);
   padding: 1.1rem 0.6rem 0.9rem;
   text-align: center;
@@ -783,13 +787,9 @@ body::before {
 .agent-bubble-active {
   border-color: var(--accent);
   background: var(--accent-soft);
-  /* No bottom border/radius: the bubble's own box was still drawing a complete rectangle even at
-     zero gap, so the description below it read as a separate (if adjacent) box, not one merged
-     shape. Open the bottom edge so it flows straight into the description's flat top edge instead. */
+  /* Open the bottom edge so it flows straight into the description's top edge instead of drawing a
+     complete rectangle that would still read as a separate (if adjacent) box. */
   border-bottom: none;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-  padding-bottom: calc(0.9rem + 1px);
 }
 .agent-bubble-icon {
   width: 44px;
@@ -855,8 +855,11 @@ body::before {
 .agent-library-grid .agent-bubble-desc {
   grid-column: 1 / -1;
   /* Cancel the grid's row gap above this element so it sits flush against the row it belongs to —
-     bonded to the active bubble via matching accent border + zero gap, not a floating box below it. */
-  margin-top: -1rem;
+     bonded to the active bubble via matching accent border + zero gap, not a floating box below it.
+     A couple px past exact cancellation on purpose: same background/border color as the active
+     bubble, so a slight overlap is invisible, whereas subpixel rounding under-cancelling it left a
+     visible 1-2px sliver of a gap. */
+  margin-top: -18px;
   margin-bottom: 0;
   text-align: left;
   color: var(--ink);
