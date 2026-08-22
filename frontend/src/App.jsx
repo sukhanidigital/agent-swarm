@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import NodeBox from "./components/NodeBox";
 import Modal from "./components/Modal";
 import Icon from "./components/Icon";
@@ -988,32 +988,29 @@ function AgentLibraryModal({ plan, onClose, onStartWizard }) {
         Review are the two dynamic ones — add or remove either from a specific tree.</p>
       <div className="agent-library-grid">
         {AGENT_LIBRARY.map((agent) => (
-          // Fragment, not a wrapper div: the description (when open) is a sibling grid item placed
-          // right after this bubble in DOM order, so CSS grid auto-flow starts a new full-width row
-          // right there — directly under this bubble's row — instead of it being trapped inside the
-          // bubble's own (narrow) column, or all descriptions being dumped below the entire grid.
-          <Fragment key={agent.id}>
-            <div className={`agent-bubble ${agent.mandatory ? "agent-bubble-mandatory" : "agent-bubble-optional"} ${expanded === agent.id ? "agent-bubble-active" : ""}`}>
-              <button className="agent-bubble-info" onClick={() => setExpanded(expanded === agent.id ? null : agent.id)}
-                aria-label={`${agent.label} info`}>
-                <Icon name="info" size={13} />
+          // The description (when open) renders INSIDE the same bordered bubble, below a divider —
+          // one continuous box, not a separate element next to or below it — so its neighbors in the
+          // row stay exactly where they are (this cell just grows taller; nothing reflows) and there's
+          // no visible seam between the bubble and its own expanded text.
+          <div key={agent.id}
+            className={`agent-bubble ${agent.mandatory ? "agent-bubble-mandatory" : "agent-bubble-optional"} ${expanded === agent.id ? "agent-bubble-active" : ""}`}>
+            <button className="agent-bubble-info" onClick={() => setExpanded(expanded === agent.id ? null : agent.id)}
+              aria-label={`${agent.label} info`}>
+              <Icon name="info" size={13} />
+            </button>
+            <div className="agent-bubble-icon"><Icon name={agent.icon} size={22} /></div>
+            <div className="agent-bubble-label">{agent.label}</div>
+            <div className="agent-bubble-model">{agent.model}</div>
+            {agent.mandatory ? (
+              <span className="agent-bubble-badge">Always on</span>
+            ) : (
+              <button className="btn-link agent-bubble-add" disabled={!plan}
+                onClick={() => onStartWizard(agent)}>
+                + Add / remove
               </button>
-              <div className="agent-bubble-icon"><Icon name={agent.icon} size={22} /></div>
-              <div className="agent-bubble-label">{agent.label}</div>
-              <div className="agent-bubble-model">{agent.model}</div>
-              {agent.mandatory ? (
-                <span className="agent-bubble-badge">Always on</span>
-              ) : (
-                <button className="btn-link agent-bubble-add" disabled={!plan}
-                  onClick={() => onStartWizard(agent)}>
-                  + Add / remove
-                </button>
-              )}
-            </div>
-            {expanded === agent.id && (
-              <p className="agent-bubble-desc"><strong>{agent.label}: </strong>{agent.description}</p>
             )}
-          </Fragment>
+            {expanded === agent.id && <p className="agent-bubble-desc">{agent.description}</p>}
+          </div>
         ))}
       </div>
       {!plan && <p className="role-desc">Plan a run first (Boot-up) — adding or removing Design or

@@ -752,6 +752,7 @@ body::before {
 .agent-library-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  align-items: start;
   gap: 1rem;
   margin-top: 0.5rem;
 }
@@ -837,18 +838,14 @@ body::before {
   border-color: var(--accent);
 }
 .agent-bubble-desc {
-  grid-column: 1 / -1;
+  width: 100%;
+  text-align: left;
   color: var(--muted);
-  font-size: 0.85rem;
-  line-height: 1.6;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 0.85rem 1rem;
-  margin: 0;
-}
-.agent-bubble-desc strong {
-  color: var(--ink);
+  font-size: 0.76rem;
+  line-height: 1.5;
+  border-top: 1px solid var(--line);
+  padding-top: 0.6rem;
+  margin: 0.5rem 0 0;
 }
 
 /* ---- add/remove agent wizard ---- */
