@@ -783,6 +783,13 @@ body::before {
 .agent-bubble-active {
   border-color: var(--accent);
   background: var(--accent-soft);
+  /* No bottom border/radius: the bubble's own box was still drawing a complete rectangle even at
+     zero gap, so the description below it read as a separate (if adjacent) box, not one merged
+     shape. Open the bottom edge so it flows straight into the description's flat top edge instead. */
+  border-bottom: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-bottom: calc(0.9rem + 1px);
 }
 .agent-bubble-icon {
   width: 44px;
