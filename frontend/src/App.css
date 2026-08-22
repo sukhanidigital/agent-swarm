@@ -752,6 +752,10 @@ body::before {
 .agent-library-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  /* dense: without this, a full-width item (the description) forces a new row and leaves the cell
+     beside the clicked bubble empty instead of pulling the next bubble up into it — reads as that
+     bubble having vanished. Dense packing fills the gap instead. */
+  grid-auto-flow: dense;
   align-items: start;
   gap: 1rem;
   margin-top: 0.5rem;
