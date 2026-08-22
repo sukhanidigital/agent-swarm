@@ -106,10 +106,10 @@ body::before {
 
 @media (max-width: 600px) {
   .app {
-    padding: 0 0.85rem 2.5rem;
+    padding: 0 0.85rem 3.5rem;
   }
   .app-header {
-    padding: 1.5rem 0 1.1rem;
+    padding: 1.75rem 0 1.75rem;
   }
   .brand {
     font-size: 1.3rem;
@@ -134,42 +134,17 @@ body::before {
     gap: 1rem;
   }
   .side-idle-stack {
-    gap: 0.9rem;
+    gap: 1.4rem;
   }
 
-  /* Top-level diagram (Boot-up / Merge trees / Auditor) goes from tall stacked cards to a compact
-     horizontal row, so the diagram + "How this works" can both land within the first screen instead
-     of pushing the explainer well below the fold. */
-  .diagram {
-    flex-direction: row;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 0.6rem;
-  }
+  /* Space the top-level diagram (Boot-up / Merge trees / Auditor) out more generously on mobile —
+     taller connectors and looser node padding — so the page reads as one deliberately-paced flow
+     ending near the bottom of the screen instead of everything huddled at the top. */
   .diagram > .connector {
-    display: none;
+    height: 40px;
   }
   .diagram > .node-box {
-    width: calc(33.33% - 0.4rem);
-    min-width: 96px;
-    padding: 0.6rem 0.4rem 0.65rem;
-  }
-  .diagram > .node-box .node-icon {
-    width: 28px;
-    height: 28px;
-    margin-bottom: 0.3rem;
-  }
-  .diagram > .node-box .node-title {
-    font-size: 0.76rem;
-  }
-  .diagram > .node-box .node-subtitle {
-    font-size: 0.6rem;
-  }
-  .diagram > .node-box .node-info-btn {
-    width: 22px;
-    height: 22px;
-    top: -8px;
-    right: -8px;
+    padding: 1.15rem 1.1rem 1.2rem;
   }
 }
 
