@@ -841,11 +841,16 @@ body::before {
   color: var(--accent);
   border-color: var(--accent);
 }
-.agent-bubble-desc {
+/* .agent-library-grid prefix (not just .agent-bubble-desc) is required for specificity: the generic
+   ".modal-body p" rule below is class+element (0,1,1), which otherwise beats a bare ".agent-bubble-
+   desc" class selector (0,1,0) and silently wins the margin-top/bottom fight — this is exactly why
+   the negative margin wasn't visually canceling the grid gap before. */
+.agent-library-grid .agent-bubble-desc {
   grid-column: 1 / -1;
   /* Cancel the grid's row gap above this element so it sits flush against the row it belongs to —
      bonded to the active bubble via matching accent border + zero gap, not a floating box below it. */
   margin-top: -1rem;
+  margin-bottom: 0;
   text-align: left;
   color: var(--ink);
   font-size: 0.85rem;
