@@ -269,53 +269,57 @@ function App() {
 
   return (
     <div className="app">
-      <header className="app-header">
-        <div className="brand"><Icon name="rocket" size={22} /> <span>Agent Swarm</span></div>
-      </header>
+      <div className={`hero${job ? "" : " hero-idle"}`}>
+        <header className="app-header">
+          <div className="brand"><Icon name="rocket" size={22} /> <span>Agent Swarm</span></div>
+        </header>
 
-      {job && <StatusBar job={job} onStop={handleStop} onOpenDetail={() => setActiveModal("boot_up")} />}
+        {job && <StatusBar job={job} onStop={handleStop} onOpenDetail={() => setActiveModal("boot_up")} />}
 
-      <div className="layout">
-        <div className="diagram">
-          <NodeBox title="Boot-up" icon="rocket" highlight onInfoClick={() => setActiveModal("boot_up")} />
-          <Connector />
+        <div className="layout">
+          <div className="diagram">
+            <NodeBox title="Boot-up" icon="rocket" highlight onInfoClick={() => setActiveModal("boot_up")} />
+            <Connector />
 
-          <div className="tree-forest">
-            {(activePlan || []).map((treePlan, i) => (
-              <TreeColumn key={i} treeId={i + 1} treePlan={treePlan} blockStatus={blockStatus} onInfoClick={openModal} />
-            ))}
+            <div className="tree-forest">
+              {(activePlan || []).map((treePlan, i) => (
+                <TreeColumn key={i} treeId={i + 1} treePlan={treePlan} blockStatus={blockStatus} onInfoClick={openModal} />
+              ))}
+            </div>
+
+            <Connector branching={(activePlan || []).length > 1} />
+            <NodeBox title="Merge trees" subtitle="git" icon="check-shield"
+              state={blockStatus.merge?.state} activity={blockStatus.merge?.activity}
+              pct={blockStatus.merge?.pct} onInfoClick={() => {}} />
+            <Connector />
+            <NodeBox title="Auditor" subtitle={GATE_MODELS.auditor} icon={GATE_ICONS.auditor}
+              state={blockStatus.auditor?.state} activity={blockStatus.auditor?.activity}
+              pct={blockStatus.auditor?.pct} onInfoClick={() => openModal("auditor")} />
           </div>
 
-          <Connector branching={(activePlan || []).length > 1} />
-          <NodeBox title="Merge trees" subtitle="git" icon="check-shield"
-            state={blockStatus.merge?.state} activity={blockStatus.merge?.activity}
-            pct={blockStatus.merge?.pct} onInfoClick={() => {}} />
-          <Connector />
-          <NodeBox title="Auditor" subtitle={GATE_MODELS.auditor} icon={GATE_ICONS.auditor}
-            state={blockStatus.auditor?.state} activity={blockStatus.auditor?.activity}
-            pct={blockStatus.auditor?.pct} onInfoClick={() => openModal("auditor")} />
-        </div>
-
-        <aside className="side-panel">
-          {job ? (
-            <div className="side-card">
-              <h3>Run detail</h3>
-              <JobStatusPanel job={job} onStop={handleStop} onResume={handleResume}
-                resumeText={resumeText} setResumeText={setResumeText} onStartNew={startNewRun} />
-            </div>
-          ) : (
-            <div className="side-idle-stack">
+          <aside className="side-panel">
+            {job ? (
+              <div className="side-card">
+                <h3>Run detail</h3>
+                <JobStatusPanel job={job} onStop={handleStop} onResume={handleResume}
+                  resumeText={resumeText} setResumeText={setResumeText} onStartNew={startNewRun} />
+              </div>
+            ) : (
               <div className="side-card side-idle">
                 <h3>How this works</h3>
-                <p>Click <strong>Boot-up</strong> to plan a run — Claude reads your prompt and decides
-                  how many trees (1-4 independent workstreams) it needs, with subtasks and dev counts
-                  per tree. Review and edit the plan before confirming.</p>
-                <p>Click any other node before starting to give it instructions, and (for Team Lead,
-                  Check & Test, and Auditor) set how many times it's allowed to reject before the job
-                  gets marked stuck.</p>
+                <p>Click <strong>Boot-up</strong> to plan a run, then review the trees Claude proposes
+                  before confirming. Click any node to add instructions or set a retry cap.</p>
                 <p>Once running, this panel fills in with the live log, cost, and (if needed) a resume box.</p>
               </div>
+            )}
+          </aside>
+        </div>
+      </div>
 
+      {!job && (
+        <div className="layout-more">
+          <aside className="side-panel">
+            <div className="side-idle-stack">
               <div className="side-card">
                 <h3>Ask about your code</h3>
                 <ChatPanel repoPath={repoPath} setRepoPath={setRepoPath} onUsePrompt={handleUsePrompt} />
@@ -337,9 +341,9 @@ function App() {
                 </div>
               </div>
             </div>
-          )}
-        </aside>
-      </div>
+          </aside>
+        </div>
+      )}
 
       {activeModal === "boot_up" && (
         <Modal title="Boot-up" onClose={closeModal}>

@@ -95,6 +95,25 @@ body::before {
   align-items: start;
 }
 
+/* Second block on the idle landing screen (Ask about your code / Run / Create repo), rendered below
+   the hero so it can scroll independently instead of being squeezed into the "fits one screen" hero
+   below. Mobile-first: plain block, the side-panel just takes the full width. Desktop mirrors the
+   hero's column layout so the card stack lines up under "How this works" instead of spanning full
+   width. */
+.layout-more {
+  margin-top: 2.5rem;
+}
+@media (min-width: 981px) {
+  .layout-more {
+    display: grid;
+    grid-template-columns: minmax(360px, 500px) 1fr;
+    gap: 2.5rem;
+  }
+  .layout-more .side-panel {
+    grid-column: 2;
+  }
+}
+
 @media (max-width: 980px) {
   .layout {
     grid-template-columns: 1fr;
@@ -137,14 +156,41 @@ body::before {
     gap: 1.4rem;
   }
 
-  /* Space the top-level diagram (Boot-up / Merge trees / Auditor) out more generously on mobile —
-     taller connectors and looser node padding — so the page reads as one deliberately-paced flow
-     ending near the bottom of the screen instead of everything huddled at the top. */
+  /* Trim the top-level diagram (Boot-up / Merge trees / Auditor) down on mobile — shorter connectors,
+     tighter node padding, smaller icons — freeing up enough height that it plus "How this works" (also
+     trimmed, see index.css... actually App.jsx copy) can land within one screen. */
   .diagram > .connector {
-    height: 40px;
+    height: 14px;
   }
   .diagram > .node-box {
-    padding: 1.15rem 1.1rem 1.2rem;
+    padding: 0.65rem 0.85rem 0.7rem;
+  }
+  .diagram > .node-box .node-icon {
+    width: 30px;
+    height: 30px;
+    margin-bottom: 0.35rem;
+  }
+
+  /* Idle landing screen: header, diagram, and "How this works" fill exactly one screen — the header
+     and diagram sit at their natural size, and the leftover space collapses into a single gap right
+     before the card, pushing its bottom down to the screen edge (with padding) instead of stacking
+     everything with dead space below. */
+  .hero-idle {
+    display: flex;
+    flex-direction: column;
+    min-height: 100dvh;
+    padding-bottom: 1.75rem;
+  }
+  .hero-idle .layout {
+    display: contents;
+  }
+  .hero-idle .side-panel {
+    position: static;
+    margin-top: auto;
+    padding-top: 1rem;
+  }
+  .hero-idle .side-idle p {
+    margin: 0 0 0.6rem;
   }
 }
 
