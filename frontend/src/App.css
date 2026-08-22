@@ -104,6 +104,37 @@ body::before {
   }
 }
 
+@media (max-width: 600px) {
+  .app {
+    padding: 0 0.85rem 2.5rem;
+  }
+  .app-header {
+    padding: 1.5rem 0 1.1rem;
+  }
+  .brand {
+    font-size: 1.3rem;
+  }
+  .side-card {
+    padding: 1.15rem;
+  }
+  .modal-body {
+    padding: 1.1rem;
+  }
+  .modal-header {
+    padding: 1rem 1.1rem;
+  }
+  .node-info-btn {
+    width: 30px;
+    height: 30px;
+  }
+  .tree-column {
+    padding: 0.9rem 0.6rem;
+  }
+  .tree-forest {
+    gap: 1rem;
+  }
+}
+
 .side-panel {
   position: sticky;
   top: 1.25rem;
@@ -163,6 +194,8 @@ body::before {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
   gap: 1rem;
   background: var(--glass-strong);
   backdrop-filter: blur(24px) saturate(140%);
@@ -187,6 +220,10 @@ body::before {
   display: flex;
   align-items: center;
   gap: 0.65rem;
+  min-width: 0;
+}
+.status-label, .status-gate {
+  overflow-wrap: anywhere;
 }
 .status-dot {
   width: 9px;
@@ -271,7 +308,7 @@ body::before {
 
 .node-box {
   position: relative;
-  width: 240px;
+  width: min(240px, 100%);
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--glass);
@@ -289,7 +326,7 @@ body::before {
 }
 
 .node-box-compact {
-  width: 172px;
+  width: min(172px, 100%);
   padding: 0.65rem 0.7rem 0.7rem;
 }
 .node-box-compact .node-icon {
@@ -733,6 +770,7 @@ body::before {
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 0.1em 0.4em;
+  overflow-wrap: anywhere;
 }
 
 .branch-note {
@@ -760,6 +798,7 @@ body::before {
   font-size: 0.76rem;
   font-family: ui-monospace, Consolas, monospace;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   line-height: 1.55;
   color: rgba(241, 242, 249, 0.85);
 }
@@ -802,7 +841,7 @@ body::before {
 
 .subtask-row {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   gap: 0.45rem;
   align-items: center;
   margin-top: 0.45rem;
@@ -963,6 +1002,7 @@ body::before {
 .run-service {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.55rem;
   font-size: 0.88rem;
   padding: 0.3rem 0;
@@ -970,6 +1010,7 @@ body::before {
 .run-service a {
   color: var(--accent);
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
 .run-status {
