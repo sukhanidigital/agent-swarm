@@ -838,14 +838,19 @@ body::before {
   border-color: var(--accent);
 }
 .agent-bubble-desc {
-  width: 100%;
+  grid-column: 1 / -1;
+  /* Cancel the grid's row gap above this element so it sits flush against the row it belongs to —
+     bonded to the active bubble via matching accent border + zero gap, not a floating box below it. */
+  margin-top: -1rem;
   text-align: left;
-  color: var(--muted);
-  font-size: 0.76rem;
-  line-height: 1.5;
-  border-top: 1px solid var(--line);
-  padding-top: 0.6rem;
-  margin: 0.5rem 0 0;
+  color: var(--ink);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-top: none;
+  border-radius: 0 0 14px 14px;
+  padding: 0.9rem 1.1rem 1rem;
 }
 
 /* ---- add/remove agent wizard ---- */

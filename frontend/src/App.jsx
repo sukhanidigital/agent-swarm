@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import NodeBox from "./components/NodeBox";
 import Modal from "./components/Modal";
 import Icon from "./components/Icon";
@@ -988,29 +988,30 @@ function AgentLibraryModal({ plan, onClose, onStartWizard }) {
         Review are the two dynamic ones — add or remove either from a specific tree.</p>
       <div className="agent-library-grid">
         {AGENT_LIBRARY.map((agent) => (
-          // The description (when open) renders INSIDE the same bordered bubble, below a divider —
-          // one continuous box, not a separate element next to or below it — so its neighbors in the
-          // row stay exactly where they are (this cell just grows taller; nothing reflows) and there's
-          // no visible seam between the bubble and its own expanded text.
-          <div key={agent.id}
-            className={`agent-bubble ${agent.mandatory ? "agent-bubble-mandatory" : "agent-bubble-optional"} ${expanded === agent.id ? "agent-bubble-active" : ""}`}>
-            <button className="agent-bubble-info" onClick={() => setExpanded(expanded === agent.id ? null : agent.id)}
-              aria-label={`${agent.label} info`}>
-              <Icon name="info" size={13} />
-            </button>
-            <div className="agent-bubble-icon"><Icon name={agent.icon} size={22} /></div>
-            <div className="agent-bubble-label">{agent.label}</div>
-            <div className="agent-bubble-model">{agent.model}</div>
-            {agent.mandatory ? (
-              <span className="agent-bubble-badge">Always on</span>
-            ) : (
-              <button className="btn-link agent-bubble-add" disabled={!plan}
-                onClick={() => onStartWizard(agent)}>
-                + Add / remove
+          // Fragment: the description (when open) is a sibling grid item placed right after this
+          // bubble, so it spans the full modal width — but it shares the active bubble's accent
+          // border color and sits flush against it (negative margin cancels the grid gap between
+          // them) so the two read as one bonded shape, not a disconnected box below the grid.
+          <Fragment key={agent.id}>
+            <div className={`agent-bubble ${agent.mandatory ? "agent-bubble-mandatory" : "agent-bubble-optional"} ${expanded === agent.id ? "agent-bubble-active" : ""}`}>
+              <button className="agent-bubble-info" onClick={() => setExpanded(expanded === agent.id ? null : agent.id)}
+                aria-label={`${agent.label} info`}>
+                <Icon name="info" size={13} />
               </button>
-            )}
+              <div className="agent-bubble-icon"><Icon name={agent.icon} size={22} /></div>
+              <div className="agent-bubble-label">{agent.label}</div>
+              <div className="agent-bubble-model">{agent.model}</div>
+              {agent.mandatory ? (
+                <span className="agent-bubble-badge">Always on</span>
+              ) : (
+                <button className="btn-link agent-bubble-add" disabled={!plan}
+                  onClick={() => onStartWizard(agent)}>
+                  + Add / remove
+                </button>
+              )}
+            </div>
             {expanded === agent.id && <p className="agent-bubble-desc">{agent.description}</p>}
-          </div>
+          </Fragment>
         ))}
       </div>
       {!plan && <p className="role-desc">Plan a run first (Boot-up) — adding or removing Design or
