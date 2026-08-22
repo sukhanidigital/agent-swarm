@@ -133,14 +133,43 @@ body::before {
   .tree-forest {
     gap: 1rem;
   }
-  .connector {
-    height: 18px;
-  }
-  .node-box {
-    padding: 0.75rem 0.85rem 0.8rem;
-  }
   .side-idle-stack {
     gap: 0.9rem;
+  }
+
+  /* Top-level diagram (Boot-up / Merge trees / Auditor) goes from tall stacked cards to a compact
+     horizontal row, so the diagram + "How this works" can both land within the first screen instead
+     of pushing the explainer well below the fold. */
+  .diagram {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.6rem;
+  }
+  .diagram > .connector {
+    display: none;
+  }
+  .diagram > .node-box {
+    width: calc(33.33% - 0.4rem);
+    min-width: 96px;
+    padding: 0.6rem 0.4rem 0.65rem;
+  }
+  .diagram > .node-box .node-icon {
+    width: 28px;
+    height: 28px;
+    margin-bottom: 0.3rem;
+  }
+  .diagram > .node-box .node-title {
+    font-size: 0.76rem;
+  }
+  .diagram > .node-box .node-subtitle {
+    font-size: 0.6rem;
+  }
+  .diagram > .node-box .node-info-btn {
+    width: 22px;
+    height: 22px;
+    top: -8px;
+    right: -8px;
   }
 }
 
