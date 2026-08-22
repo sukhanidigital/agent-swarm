@@ -305,17 +305,6 @@ function App() {
             </div>
           ) : (
             <div className="side-idle-stack">
-              <div className="side-card side-idle">
-                <h3>How this works</h3>
-                <p>Click <strong>Boot-up</strong> to plan a run — Claude reads your prompt and decides
-                  how many trees (1-4 independent workstreams) it needs, with subtasks and dev counts
-                  per tree. Review and edit the plan before confirming.</p>
-                <p>Click any other node before starting to give it instructions, and (for Team Lead,
-                  Check & Test, and Auditor) set how many times it's allowed to reject before the job
-                  gets marked stuck.</p>
-                <p>Once running, this panel fills in with the live log, cost, and (if needed) a resume box.</p>
-              </div>
-
               <div className="side-card">
                 <h3>Ask about your code</h3>
                 <ChatPanel repoPath={repoPath} setRepoPath={setRepoPath} onUsePrompt={handleUsePrompt} />
@@ -335,6 +324,17 @@ function App() {
                     onSubmit={handleCreateRepo} compact
                   />
                 </div>
+              </div>
+
+              <div className="side-card side-idle">
+                <h3>How this works</h3>
+                <p>Click <strong>Boot-up</strong> to plan a run — Claude reads your prompt and decides
+                  how many trees (1-4 independent workstreams) it needs, with subtasks and dev counts
+                  per tree. Review and edit the plan before confirming.</p>
+                <p>Click any other node before starting to give it instructions, and (for Team Lead,
+                  Check & Test, and Auditor) set how many times it's allowed to reject before the job
+                  gets marked stuck.</p>
+                <p>Once running, this panel fills in with the live log, cost, and (if needed) a resume box.</p>
               </div>
             </div>
           )}
