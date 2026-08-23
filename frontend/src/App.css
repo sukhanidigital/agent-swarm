@@ -763,11 +763,7 @@ body::before {
 .agent-bubble {
   position: relative;
   border: 1px solid var(--line);
-  /* Flat bottom, always — not just on the active bubble. This is what actually fixes the mismatch:
-     whichever bubble in a row gets expanded, its flat-bottomed row-mates already line up cleanly
-     with the description's flat top, instead of a round corner sitting oddly flush against a flat
-     edge on whichever side wasn't the one clicked. */
-  border-radius: 18px 18px 0 0;
+  border-radius: 18px;
   background: var(--glass);
   padding: 1.1rem 0.6rem 0.9rem;
   text-align: center;
@@ -787,9 +783,11 @@ body::before {
 .agent-bubble-active {
   border-color: var(--accent);
   background: var(--accent-soft);
-  /* Open the bottom edge so it flows straight into the description's top edge instead of drawing a
-     complete rectangle that would still read as a separate (if adjacent) box. */
+  /* Open the bottom edge (and only this bubble's) so it flows straight into the description's top
+     edge instead of drawing a complete rectangle that would still read as a separate box. */
   border-bottom: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 .agent-bubble-icon {
   width: 44px;
