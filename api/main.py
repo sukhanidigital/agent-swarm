@@ -4,16 +4,20 @@ the job engine and doesn't serve any frontend assets itself."""
 import threading
 import uuid
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from api.auth import require_api_key
 from orchestrator import chat, runner, store
 from orchestrator.agents import CLAUDE_MODELS, DEFAULT_MODELS, OPENAI_MODELS, PROVIDERS, TREE_PHASES, plan_project
 from orchestrator.git_tools import init_repo
 from orchestrator.pipeline import repo_listing, resume_job, run_job
 
-app = FastAPI(title="Agent Swarm")
+# dependencies=[...] applies to every route below — this backend runs shell/dev-agent commands
+# against whatever repo_path it's given, so once it's reachable from anywhere but localhost every
+# endpoint needs to be behind the same gate. See api/auth.py — it's a no-op until API_KEY is set.
+app = FastAPI(title="Agent Swarm", dependencies=[Depends(require_api_key)])
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 

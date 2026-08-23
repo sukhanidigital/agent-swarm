@@ -9,6 +9,7 @@ import {
   startPathRun, getPathRunStatus, stopPathRun, getModelConfig,
 } from "./api";
 import { estimatePlan, formatMinutes } from "./estimate";
+import { getApiUrl, setApiUrl, getApiKey, setApiKey, isConfigured } from "./config";
 import "./App.css";
 
 const TERMINAL_STATUSES = ["done", "failed", "stopped", "stuck"];
@@ -59,6 +60,7 @@ function App() {
   const [draftModel, setDraftModel] = useState("");
 
   useEffect(() => {
+    if (!isConfigured()) return; // nothing to fetch yet — Settings forces itself open in this case
     getModelConfig().then((cfg) => {
       setModelConfig(cfg);
       setBlockModels(cfg.default_models);
@@ -66,6 +68,25 @@ function App() {
       // if this fails the model dropdowns just won't render — everything else still works
     });
   }, []);
+
+  // --- settings (API URL + key) — forced open on first run if nothing's configured yet, since
+  // every other request in this app would otherwise fire against an empty/wrong URL. Reachable again
+  // afterward via the gear button next to Agent Library, for switching backends or rotating the key. ---
+  const [settingsOpen, setSettingsOpen] = useState(() => !isConfigured());
+  const [draftApiUrl, setDraftApiUrl] = useState(() => getApiUrl());
+  const [draftApiKey, setDraftApiKey] = useState(() => getApiKey());
+
+  function saveSettings() {
+    setApiUrl(draftApiUrl.trim());
+    setApiKey(draftApiKey.trim());
+    setSettingsOpen(false);
+    getModelConfig().then((cfg) => {
+      setModelConfig(cfg);
+      setBlockModels(cfg.default_models);
+    }).catch(() => {
+      // wrong URL/key — the dropdowns just won't populate; the fields stay editable via the gear icon
+    });
+  }
 
   // --- agent library + add/remove-agent wizard (stacked on top of the library, same pattern as
   // create-repo stacking on top of Boot-up) ---
@@ -292,6 +313,11 @@ function App() {
             <Icon name="briefcase" size={15} /> <span className="library-btn-label">Agent Library</span>
           </button>
           <div className="brand"><Icon name="rocket" size={22} /> <span>Agent Swarm</span></div>
+          <button className="settings-btn" onClick={() => {
+            setDraftApiUrl(getApiUrl()); setDraftApiKey(getApiKey()); setSettingsOpen(true);
+          }} aria-label="Settings">
+            <Icon name="gear" size={17} />
+          </button>
         </header>
 
         {job && <StatusBar job={job} onStop={handleStop} onOpenDetail={() => setActiveModal("boot_up")} />}
@@ -405,6 +431,15 @@ function App() {
 
       {libraryOpen && (
         <AgentLibraryModal plan={plan} onClose={() => setLibraryOpen(false)} onStartWizard={startWizard} />
+      )}
+
+      {settingsOpen && (
+        <SettingsModal
+          apiUrl={draftApiUrl} setApiUrl={setDraftApiUrl}
+          apiKey={draftApiKey} setApiKey={setDraftApiKey}
+          onSave={saveSettings}
+          onClose={() => setSettingsOpen(false)}
+        />
       )}
 
       {wizard && (
@@ -976,6 +1011,23 @@ function HomeRunCard() {
         </>
       )}
     </div>
+  );
+}
+
+function SettingsModal({ apiUrl, setApiUrl, apiKey, setApiKey, onSave, onClose }) {
+  return (
+    <Modal title="Settings" onClose={onClose}>
+      <p className="role-desc">Where the backend lives, and the key to talk to it. Needed once
+        you're not opening this from the same machine running <code>python swarm.py</code> — a real
+        deployment, or the mobile app.</p>
+      <label>API URL</label>
+      <input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)}
+        placeholder="https://your-domain.example.com" />
+      <label>API key</label>
+      <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+        placeholder="leave blank if the backend has no API_KEY set" />
+      <button className="btn-primary btn-start" onClick={onSave}>Save</button>
+    </Modal>
   );
 }
 
