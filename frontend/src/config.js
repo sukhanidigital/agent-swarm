@@ -1,3 +1,5 @@
+import { Capacitor } from "@capacitor/core";
+
 // Where the API actually lives, and the key to talk to it — needed once this isn't just "open the
 // page from the same machine running the backend" (a Capacitor mobile shell has no meaningful
 // window.location.hostname to derive it from; a browser opened against a real deployment needs an
@@ -9,8 +11,12 @@ const URL_KEY = "swarm_api_url";
 const KEY_KEY = "swarm_api_key";
 
 function guessApiUrl() {
-  if (typeof window === "undefined" || !window.location || window.location.protocol === "capacitor:") {
-    return ""; // no sane guess inside a Capacitor mobile shell — force explicit configuration
+  // Capacitor.isNativePlatform() is the real check — the webview's own origin varies by platform
+  // (capacitor://localhost on iOS, https://localhost on Android) and neither one is the actual
+  // backend, so checking window.location.protocol alone would silently guess wrong on Android
+  // instead of correctly falling through to "no sane guess, ask the user".
+  if (typeof window === "undefined" || !window.location || Capacitor.isNativePlatform()) {
+    return "";
   }
   return `${window.location.protocol}//${window.location.hostname}:8000`;
 }

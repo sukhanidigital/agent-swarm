@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Capacitor: the android/ and ios/ native projects ARE committed (that's where icons, permissions,
+# and other native-side customization live), but the web assets `cap sync` copies into them are a
+# build artifact regenerated from dist/ every time — same reasoning as ignoring dist/ itself.
+android/app/src/main/assets/public
+ios/App/App/public
+.env
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
