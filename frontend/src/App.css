@@ -725,6 +725,39 @@ body::before {
   margin-top: 0.5rem;
 }
 
+.path-status {
+  font-size: 0.78rem !important;
+  margin: 0.3rem 0 0 !important;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.path-status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.path-status-ok {
+  color: var(--green) !important;
+}
+.path-status-ok::before {
+  background: var(--green);
+}
+.path-status-bad {
+  color: var(--red) !important;
+}
+.path-status-bad::before {
+  background: var(--red);
+}
+.path-status-checking {
+  color: var(--muted) !important;
+}
+.path-status-checking::before {
+  background: var(--muted);
+}
+
 .modal-body code,
 .side-card code {
   font-family: ui-monospace, Consolas, monospace;
@@ -798,6 +831,32 @@ body::before {
 }
 .tree-plan-header strong {
   font-family: var(--font-display);
+}
+.tree-plan-title {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.complexity-badge {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.5rem;
+  border-radius: 5px;
+}
+.complexity-low {
+  color: var(--green);
+  background: var(--green-soft);
+}
+.complexity-medium {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+.complexity-high {
+  color: var(--red);
+  background: var(--red-soft);
 }
 
 .subtask-row {

@@ -7,7 +7,13 @@ const API = `${window.location.protocol}//${window.location.hostname}:8000`;
 export async function getModelConfig() {
   const res = await fetch(`${API}/models`);
   if (!res.ok) throw new Error(`Couldn't fetch model config: ${await res.text()}`);
-  return res.json(); // { providers, default_models, claude_models, openai_models }
+  return res.json(); // { providers, default_models, claude_models, openai_models, pricing }
+}
+
+export async function checkPath(path) {
+  const res = await fetch(`${API}/check-path?path=${encodeURIComponent(path)}`);
+  if (!res.ok) throw new Error(`Couldn't check path: ${await res.text()}`);
+  return res.json(); // { exists, is_dir, is_git_repo, is_absolute }
 }
 
 export async function planProject({ prompt, repoPath, instructions, model }) {
@@ -17,8 +23,10 @@ export async function planProject({ prompt, repoPath, instructions, model }) {
     body: JSON.stringify({ prompt, repo_path: repoPath, instructions: instructions || "", model }),
   });
   if (!res.ok) throw new Error(`Couldn't plan: ${await res.text()}`);
-  const data = await res.json();
-  return data.trees; // [{summary, subtasks: [{task, acceptance}], num_devs}]
+  // Full response now, not just trees: each tree also carries a suggested complexity/models/caps/
+  // instructions, plus top-level auditor_model/auditor_cap/auditor_instructions — all editable
+  // starting points the caller pre-fills the UI with, not binding decisions.
+  return res.json();
 }
 
 export async function submitJob({ prompt, repoPath, plan, maxCost, blockInstructions, gateCaps, models }) {

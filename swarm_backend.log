@@ -1,0 +1,31 @@
+INFO:     Started server process [22740]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:53317 - "GET /check-path?path=C%3A%5CAaryan%20Stuff%5CAgentSwarm%5CDevelopment HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53319 - "GET /check-path?path=C%3A%5Cthis%5Cdoes%5Cnot%5Cexist%5Cat%5Call HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53321 - "GET /check-path?path=notapath HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52775 - "GET /models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52775 - "GET /models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55947 - "GET /check-path?path=C%3A%5Cthis%5Cdoes%5Cnot%5Cexist HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65104 - "GET /check-path?path=C%3A%5CAaryan%20Stuff%5CAgentSwarm%5CDevelopment HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58095 - "GET /models HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58095 - "GET /models HTTP/1.1" 200 OK
+INFO:     192.168.0.148:61468 - "GET /models HTTP/1.1" 200 OK
+INFO:     192.168.0.148:61468 - "GET /models HTTP/1.1" 200 OK
+INFO:     192.168.0.148:57977 - "GET /check-path?path=C%3A%5CAaryan%20Stuff%5CAgentSwarm%5CDevelopment%5Cdemo%5Ctest1 HTTP/1.1" 200 OK
+INFO:     192.168.0.148:57977 - "OPTIONS /chat/start HTTP/1.1" 200 OK
+INFO:     192.168.0.148:57977 - "POST /chat/start HTTP/1.1" 200 OK
+INFO:     192.168.0.148:52688 - "OPTIONS /chat/f8d9fd75-d623-4ff7-9592-0309fe099f9e/message HTTP/1.1" 200 OK
+INFO:     192.168.0.148:52688 - "POST /chat/f8d9fd75-d623-4ff7-9592-0309fe099f9e/message HTTP/1.1" 200 OK
+INFO:     192.168.0.148:61078 - "POST /chat/f8d9fd75-d623-4ff7-9592-0309fe099f9e/message HTTP/1.1" 200 OK
+INFO:     192.168.0.148:58781 - "OPTIONS /plan HTTP/1.1" 200 OK
+INFO:     192.168.0.148:58781 - "POST /plan HTTP/1.1" 200 OK
+INFO:     192.168.0.148:51563 - "GET /models HTTP/1.1" 200 OK
+INFO:     192.168.0.148:51563 - "GET /models HTTP/1.1" 200 OK
+INFO:     192.168.0.148:60957 - "GET /models HTTP/1.1" 200 OK
+INFO:     192.168.0.148:60957 - "GET /models HTTP/1.1" 200 OK
+INFO:     192.168.0.148:62063 - "GET /models HTTP/1.1" 200 OK
+INFO:     192.168.0.148:62063 - "GET /models HTTP/1.1" 200 OK
+INFO:     192.168.0.148:58075 - "GET /models HTTP/1.1" 200 OK
+INFO:     192.168.0.148:58075 - "GET /models HTTP/1.1" 200 OK

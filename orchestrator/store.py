@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     subtasks TEXT,
     block_status TEXT NOT NULL DEFAULT '{}',
     plan TEXT,
-    gate_caps TEXT NOT NULL DEFAULT '{"team_lead": 5, "check_and_test": 5, "auditor": 5}',
+    gate_caps TEXT NOT NULL DEFAULT '{}',
     models TEXT NOT NULL DEFAULT '{}',
     log TEXT NOT NULL DEFAULT '[]',
     created_at REAL NOT NULL,
@@ -52,11 +52,13 @@ _MIGRATIONS = [
     ("subtasks", "TEXT"),  # legacy (v3 single-tree decompose output) — unused since v4's `plan` replaced it
     ("block_status", "TEXT NOT NULL DEFAULT '{}'"),
     ("plan", "TEXT"),
-    ("gate_caps", 'TEXT NOT NULL DEFAULT \'{"team_lead": 5, "check_and_test": 5, "auditor": 5}\''),
+    # Per-gate-INSTANCE (not per-type) override, keyed by the exact block label — e.g.
+    # "tree_1_team_lead" and "tree_2_team_lead" can each have their own cap/model now, rather than one
+    # value shared across every tree's team_lead. Empty dict means "use the fallback default for
+    # anything not explicitly set" (DEFAULT_GATE_CAP for caps, agents.DEFAULT_MODELS for models) —
+    # these columns only ever need to hold what was actually overridden for a specific block.
+    ("gate_caps", "TEXT NOT NULL DEFAULT '{}'"),
     ("next_tree_index", "INTEGER NOT NULL DEFAULT 0"),
-    # Per-gate-type model override (planner/team_lead/dev/check_and_test/auditor -> model id). Empty
-    # dict means "use agents.DEFAULT_MODELS" — pipeline.py fills in any gap, this column only ever
-    # needs to hold what the user actually overrode.
     ("models", "TEXT NOT NULL DEFAULT '{}'"),
 ]
 
@@ -73,7 +75,7 @@ def _connect():
     return conn
 
 
-DEFAULT_GATE_CAPS = {"team_lead": 5, "check_and_test": 5, "auditor": 5}
+DEFAULT_GATE_CAP = 5  # fallback used for any capped block that isn't explicitly in a job's gate_caps
 
 
 def create_job(prompt: str, repo_path: str, config: dict, plan: list, max_cost: float = 1.0,
@@ -87,7 +89,7 @@ def create_job(prompt: str, repo_path: str, config: dict, plan: list, max_cost: 
             "INSERT INTO jobs (id, prompt, repo_path, config, status, max_cost, plan, gate_caps, models, "
             "log, created_at, updated_at) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, '[]', ?, ?)",
             (job_id, prompt, repo_path, json.dumps(config), max_cost, json.dumps(plan),
-             json.dumps(gate_caps or DEFAULT_GATE_CAPS), json.dumps(models or {}), now, now),
+             json.dumps(gate_caps or {}), json.dumps(models or {}), now, now),
         )
     return job_id
 

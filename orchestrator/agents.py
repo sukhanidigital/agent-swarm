@@ -55,9 +55,38 @@ Critical: give each tree an explicit, non-overlapping scope (specific files/dire
 no two trees ever need to touch the same file — this is what keeps the eventual cross-tree merge cheap
 and safe. State each tree's scope explicitly in its summary.
 
+You also propose starting configuration for the pipeline that will actually build each tree — the
+user sees and can freely edit every one of these before anything runs, so give your honest best
+judgment rather than always reaching for defaults:
+
+- complexity: "low", "medium", or "high" — your honest read of how fiddly this tree's actual work is.
+  "low" = simple, well-trodden glue/CRUD code. "medium" = real logic or integration work, some judgment
+  calls. "high" = domain-specific work likely to need real iteration (e.g. media/binary processing,
+  intricate parsing, anything you'd expect a human engineer to get wrong on the first try). This drives
+  the user's cost/time estimate, so be honest, not optimistic — call something "high" if it genuinely is.
+- team_lead_model / dev_model / check_and_test_model: pick from exactly these OpenAI model IDs:
+  {openai_models}. Reach for a stronger model on a "high" complexity tree, the cheapest sensible one on
+  "low" complexity trees — don't default to the same model for every tree regardless of difficulty.
+- team_lead_cap / check_and_test_cap: how many rejection rounds that gate should be allowed on this
+  tree specifically before the job is marked stuck and needs a human. 3-5 for straightforward trees,
+  higher (up to 10) for a "high" complexity tree that's likely to need real iteration.
+- team_lead_instructions / dev_instructions / check_and_test_instructions: optional (empty string if
+  you have nothing specific to add) — a short, concrete pointer for that role on this specific tree,
+  not generic advice it would already know.
+
+Also propose, for the single top-level auditor step (after every tree merges):
+- auditor_model: pick from exactly these Claude model IDs: {claude_models}.
+- auditor_cap: rejection rounds allowed before the job is marked stuck.
+- auditor_instructions: optional, empty string if nothing specific.
+
 Respond ONLY with JSON:
-{"trees": [{"summary": "one line: what this tree owns and its scope",
-            "subtasks": [{"task": "...", "acceptance": "..."}], "num_devs": 1}]}"""
+{{"trees": [{{"summary": "one line: what this tree owns and its scope",
+             "subtasks": [{{"task": "...", "acceptance": "..."}}], "num_devs": 1,
+             "complexity": "low"|"medium"|"high",
+             "team_lead_model": "...", "dev_model": "...", "check_and_test_model": "...",
+             "team_lead_cap": 5, "check_and_test_cap": 5,
+             "team_lead_instructions": "", "dev_instructions": "", "check_and_test_instructions": ""}}],
+ "auditor_model": "...", "auditor_cap": 5, "auditor_instructions": ""}}"""
 
 TEAM_LEAD_PLAN_SYSTEM = """You are the engineering team lead for a small dev team of {n} developers.
 You've been given a subtask list (each with an acceptance criterion) from your manager. Assign each
@@ -169,14 +198,19 @@ re-open a tree that isn't implicated by the notes. Respond ONLY with JSON:
 
 
 def plan_project(prompt: str, repo_listing: str, lessons: str = "", instructions: str = "",
-                  model: str = DEFAULT_MODELS["planner"]) -> list[dict]:
+                  model: str = DEFAULT_MODELS["planner"]) -> dict:
+    """Returns the full planner response — trees (each carrying a suggested complexity, per-role
+    models, retry caps, and instructions) plus top-level auditor suggestions. Every one of these is a
+    starting point the user reviews and can freely edit in the UI before anything runs, never a
+    binding decision the planner makes unilaterally."""
     context = f"User request: {prompt}\n\nRepo root listing:\n{repo_listing}"
     if lessons:
         context += f"\n\nLessons from past runs on this repo (avoid repeating these mistakes):\n{lessons}"
     if instructions:
         context += f"\n\nUser instructions for you specifically:\n{instructions}"
-    text = call_claude(PLAN_PROJECT_SYSTEM, context, model=model, max_tokens=8192)
-    return safe_json_load(text)["trees"]
+    system = PLAN_PROJECT_SYSTEM.format(openai_models=OPENAI_MODELS, claude_models=CLAUDE_MODELS)
+    text = call_claude(system, context, model=model, max_tokens=8192)
+    return safe_json_load(text)
 
 
 def team_lead_plan(subtasks: list, num_devs: int, instructions: str = "",

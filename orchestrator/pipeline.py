@@ -9,12 +9,13 @@ auditor rejects, a coordinator (the team-lead-tier model) decides which tree(s) 
 re-run (via run_tree's `initial_notes`, which skips straight to a revision round) before re-merging
 and re-auditing — never blindly re-running every tree.
 
-Each of the three gate *types* (team_lead, check_and_test, auditor) has its own configurable rejection
-cap (job.gate_caps — same cap value applies to that gate type across every tree, editable from any of
-that gate's info modals in the UI) plus a job-wide budget cap. Hitting either marks the job "stuck"
-with enough state persisted (job.plan, job.next_tree_index) to resume: resume_job() routes your
-correction through the same coordinator that handles auditor rejections, then continues any trees that
-hadn't run yet if the job got stuck mid-sequence."""
+Each capped gate *instance* (a specific tree's team_lead, a specific tree's check_and_test, the single
+auditor) has its own independently configurable rejection cap (job.gate_caps, keyed by exact block
+label — not shared across trees) plus a job-wide budget cap. Hitting either marks the job "stuck" with
+enough state persisted (job.plan, job.next_tree_index) to resume: resume_job() routes your correction
+through the same coordinator that handles auditor rejections, then continues any trees that hadn't run
+yet if the job got stuck mid-sequence. Models are the same story — job.models is keyed by exact block
+label too, so tree 3's team_lead can run a different model than tree 1's."""
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -61,10 +62,10 @@ def _build_context(job_id: str, prompt: str, repo_path: str, config: dict, max_c
                     gate_attempts: dict, accumulator: cost.CostAccumulator, models: dict = None):
     cost.bind(accumulator)
     block_instructions = config.get("block_instructions", {})
-    # Per-gate-type model override (team_lead/dev/check_and_test/auditor — same "one value shared
-    # across every tree's instance of that gate type" convention gate_caps already uses), falling
-    # back to the DEFAULT_MODELS baked into agents.py for anything the job didn't specify.
-    models_cfg = {**DEFAULT_MODELS, **(models or {})}
+    models = models or {}  # keyed by exact block label, e.g. "tree_2_team_lead" — not by gate type
+
+    def model_for(block: str, gate_type: str) -> str:
+        return models.get(block, DEFAULT_MODELS[gate_type])
 
     def log(line: str):
         store.append_log(job_id, line)
@@ -109,21 +110,24 @@ def _build_context(job_id: str, prompt: str, repo_path: str, config: dict, max_c
         memory.log_job_summary(job_id, repo_path, prompt, status, accumulator.total, sum(gate_attempts.values()))
 
     def bump(block_label: str, gate_type: str) -> bool:
-        """Increment one gate instance's rejection count against its gate-TYPE cap. Returns True if
-        the job should stop (cap hit)."""
+        """Increment one gate instance's rejection count against its OWN cap (independent per
+        instance now — tree 3's check_and_test can have a different cap than tree 1's). Returns True
+        if the job should stop (cap hit)."""
         gate_attempts[block_label] = gate_attempts.get(block_label, 0) + 1
         store.update_job(job_id, gate_attempts=gate_attempts)
-        cap = gate_caps.get(gate_type, 5)
+        cap = gate_caps.get(block_label, store.DEFAULT_GATE_CAP)
         if gate_attempts[block_label] > cap:
             log(f"{block_label} has rejected {cap} times — job stuck, needs your input.")
             finish("stuck", stuck_reason=f"{block_label} hit its {gate_type} cap ({cap} attempts)")
             return True
         return False
 
-    def run_dev_round(block_prefix: str, assignments: list, base_branch: str, base_wt_path: str,
-                       lessons: str, round_id: str):
+    def run_dev_round(block_prefix: str, tl_block: str, assignments: list, base_branch: str,
+                       base_wt_path: str, lessons: str, round_id: str):
         """Run each assigned dev in its own worktree branched off base_branch, then merge every dev
-        branch back into base_wt_path. block_prefix e.g. "tree_1_dev_" -> dev block "tree_1_dev_2"."""
+        branch back into base_wt_path. block_prefix e.g. "tree_1_dev_" -> dev block "tree_1_dev_2".
+        tl_block is this tree's team_lead block label — used to pick the model for merge-conflict
+        resolution, since that's a team-lead-role task."""
         def do_one(assignment):
             cost.bind(accumulator)
             dev_id = assignment["developer"]
@@ -134,7 +138,7 @@ def _build_context(job_id: str, prompt: str, repo_path: str, config: dict, max_c
             try:
                 dev_wt = create_branch_worktree(repo_path, base_branch, f"{block}-{round_id}", WORKTREES_ROOT)
                 result = run_dev_agent(dev_id, assignment["tasks"], dev_wt["worktree_path"], extra, lessons,
-                                        report=make_reporter(block), model=models_cfg["dev"])
+                                        report=make_reporter(block), model=model_for(block, "dev"))
                 commit_all(dev_wt["worktree_path"], f"{block} ({round_id}): {assignment['tasks']}")
             except Exception as exc:  # noqa: BLE001 - one dev's transient failure (git hiccup, API
                 # blip, subprocess error) must not take the whole job down with an opaque thread trace
@@ -158,7 +162,7 @@ def _build_context(job_id: str, prompt: str, repo_path: str, config: dict, max_c
             if merge["conflict"]:
                 log(f"Merge conflict from {block}, resolving: {merge['conflicted_files']}")
                 resolve_merge_conflict(base_wt_path, dev_wt["branch"], merge["conflicted_files"],
-                                        report=make_reporter(block), model=models_cfg["team_lead"])
+                                        report=make_reporter(block), model=model_for(tl_block, "team_lead"))
                 finish_merge(base_wt_path, f"merge {block} ({round_id}), conflict resolved")
             remove_worktree(repo_path, dev_wt["worktree_path"])
             delete_branch(repo_path, dev_wt["branch"])
@@ -175,7 +179,7 @@ def _build_context(job_id: str, prompt: str, repo_path: str, config: dict, max_c
         "log": log, "set_gate": set_gate, "check_stop": check_stop, "check_budget": check_budget,
         "finish": finish, "bump": bump, "start_block": start_block, "finish_block": finish_block,
         "make_reporter": make_reporter, "run_dev_round": run_dev_round, "block_instructions": block_instructions,
-        "models": models_cfg,
+        "model_for": model_for,
     }
 
 
@@ -188,7 +192,7 @@ def run_tree(ctx: dict, job_id: str, repo_path: str, tree_id: int, tree_plan: di
     signaled by the caller re-checking job status after this returns."""
     log, start_block, finish_block = ctx["log"], ctx["start_block"], ctx["finish_block"]
     make_reporter, run_dev_round, bump = ctx["make_reporter"], ctx["run_dev_round"], ctx["bump"]
-    block_instructions, models = ctx["block_instructions"], ctx["models"]
+    block_instructions, model_for = ctx["block_instructions"], ctx["model_for"]
 
     tl_block, cnt_block, dev_prefix = f"tree_{tree_id}_team_lead", f"tree_{tree_id}_check_and_test", f"tree_{tree_id}_dev_"
     subtasks = tree_plan["subtasks"]
@@ -210,12 +214,14 @@ def run_tree(ctx: dict, job_id: str, repo_path: str, tree_id: int, tree_plan: di
     if initial_notes is None:
         start_block(tl_block, f"assigning {len(subtasks)} subtask(s) to {num_devs} developer(s)")
         log(f"Tree {tree_id}: team lead assigning {len(subtasks)} subtask(s) to {num_devs} developer(s)...")
-        assignments = team_lead_plan(subtasks, num_devs, block_instructions.get(tl_block, ""), model=models["team_lead"])
+        assignments = team_lead_plan(subtasks, num_devs, block_instructions.get(tl_block, ""),
+                                      model=model_for(tl_block, "team_lead"))
         finish_block(tl_block, "assignments made")
     else:
         log(f"Tree {tree_id}: revising with — {initial_notes}")
-        assignments = team_lead_revise("coordinator", initial_notes, subtasks, num_devs, model=models["team_lead"])
-    run_dev_round(dev_prefix, assignments, tree_branch, tree_wt_path, lessons, next_round_id())
+        assignments = team_lead_revise("coordinator", initial_notes, subtasks, num_devs,
+                                        model=model_for(tl_block, "team_lead"))
+    run_dev_round(dev_prefix, tl_block, assignments, tree_branch, tree_wt_path, lessons, next_round_id())
 
     while True:
         if ctx["check_stop"]() or ctx["check_budget"]():
@@ -225,7 +231,7 @@ def run_tree(ctx: dict, job_id: str, repo_path: str, tree_id: int, tree_plan: di
         start_block(tl_block, "quality gate: reviewing UX/accuracy")
         diff = diff_against(tree_wt_path, tree_base_sha)
         ql = team_lead_quality_gate(subtasks, diff, tree_wt_path, block_instructions.get(tl_block, ""),
-                                     report=make_reporter(tl_block), model=models["team_lead"])
+                                     report=make_reporter(tl_block), model=model_for(tl_block, "team_lead"))
         commit_all(tree_wt_path, f"tree {tree_id}: quality gate pass")
         log(f"Tree {tree_id} team lead verdict: {ql['verdict']} — {ql['notes']}")
         memory.log_gate_verdict(job_id, repo_path, tl_block, round_counter[0], ql["verdict"], ql["notes"])
@@ -233,8 +239,9 @@ def run_tree(ctx: dict, job_id: str, repo_path: str, tree_id: int, tree_plan: di
             finish_block(tl_block, f"revise: {ql['notes'][:100]}")
             if bump(tl_block, "team_lead"):
                 return False
-            assignments = team_lead_revise("team lead (quality)", ql["notes"], subtasks, num_devs, model=models["team_lead"])
-            run_dev_round(dev_prefix, assignments, tree_branch, tree_wt_path, lessons, next_round_id())
+            assignments = team_lead_revise("team lead (quality)", ql["notes"], subtasks, num_devs,
+                                            model=model_for(tl_block, "team_lead"))
+            run_dev_round(dev_prefix, tl_block, assignments, tree_branch, tree_wt_path, lessons, next_round_id())
             continue
         finish_block(tl_block, "approved")
 
@@ -245,15 +252,16 @@ def run_tree(ctx: dict, job_id: str, repo_path: str, tree_id: int, tree_plan: di
         start_block(cnt_block, "checking scope/security/formatting and running the code")
         diff = diff_against(tree_wt_path, tree_base_sha)
         cnt = check_and_test(subtasks, diff, tree_wt_path, block_instructions.get(cnt_block, ""),
-                              report=make_reporter(cnt_block), model=models["check_and_test"])
+                              report=make_reporter(cnt_block), model=model_for(cnt_block, "check_and_test"))
         log(f"Tree {tree_id} check&test verdict: {cnt['verdict']} — {cnt['notes']}")
         memory.log_gate_verdict(job_id, repo_path, cnt_block, round_counter[0], cnt["verdict"], cnt["notes"])
         if cnt["verdict"] != "approve":
             finish_block(cnt_block, f"revise: {cnt['notes'][:100]}")
             if bump(cnt_block, "check_and_test"):
                 return False
-            assignments = team_lead_revise("checker/tester", cnt["notes"], subtasks, num_devs, model=models["team_lead"])
-            run_dev_round(dev_prefix, assignments, tree_branch, tree_wt_path, lessons, next_round_id())
+            assignments = team_lead_revise("checker/tester", cnt["notes"], subtasks, num_devs,
+                                            model=model_for(tl_block, "team_lead"))
+            run_dev_round(dev_prefix, tl_block, assignments, tree_branch, tree_wt_path, lessons, next_round_id())
             continue
         finish_block(cnt_block, "approved")
         break
@@ -264,7 +272,7 @@ def run_tree(ctx: dict, job_id: str, repo_path: str, tree_id: int, tree_plan: di
     if merge["conflict"]:
         log(f"Merge conflict from tree {tree_id}, resolving: {merge['conflicted_files']}")
         resolve_merge_conflict(job_wt_path, tree_branch, merge["conflicted_files"],
-                                report=make_reporter("merge"), model=models["team_lead"])
+                                report=make_reporter("merge"), model=model_for(tl_block, "team_lead"))
         finish_merge(job_wt_path, f"merge tree {tree_id}, conflict resolved")
     finish_block("merge", f"tree {tree_id} merged")
     remove_worktree(repo_path, tree_wt_path)
@@ -277,7 +285,7 @@ def _run_top_level(ctx: dict, job_id: str, prompt: str, repo_path: str, plan: li
     """After every tree has merged: Summarizer -> Auditor, looping (via the coordinator, targeting
     only the tree(s) actually at fault) on rejection."""
     log, start_block, finish_block, bump = ctx["log"], ctx["start_block"], ctx["finish_block"], ctx["bump"]
-    models = ctx["models"]
+    model_for = ctx["model_for"]
 
     while True:
         if ctx["check_stop"]() or ctx["check_budget"]():
@@ -287,11 +295,13 @@ def _run_top_level(ctx: dict, job_id: str, prompt: str, repo_path: str, plan: li
         start_block("auditor", "reviewing combined diff")
         diff = diff_against(job_wt_path, job_base_sha)
         log("Summarizer writing recap for the auditor...")
-        detailed_summary = long_summarize(diff, model=models["check_and_test"])
+        # No dedicated UI block for the summarizer (it's not a user-configurable gate) — fixed on the
+        # flash tier default rather than trying to derive a model from a block that doesn't exist.
+        detailed_summary = long_summarize(diff, model=DEFAULT_MODELS["check_and_test"])
 
         log("Claude auditing final diff (spot-check only, trusting the diff + summary)...")
         aud = audit(prompt, detailed_summary, diff, job_wt_path, ctx["block_instructions"].get("auditor", ""),
-                    report=ctx["make_reporter"]("auditor"), model=models["auditor"])
+                    report=ctx["make_reporter"]("auditor"), model=model_for("auditor", "auditor"))
         commit_all(job_wt_path, "auditor: polish")
         log(f"Audit verdict: {aud['verdict']} — {aud['notes']}")
         memory.log_gate_verdict(job_id, repo_path, "auditor", 0, aud["verdict"], aud["notes"])
@@ -319,7 +329,8 @@ def revise_flagged_trees(ctx: dict, job_id: str, repo_path: str, plan: list, not
     """Used by both the auditor-rejection loop and resume_job(): ask the coordinator which tree(s)
     are at fault given free-text notes (audit notes, or your own resume instructions), then re-run
     only those. Returns False if any flagged tree hit its own local cap (job already marked stuck)."""
-    trees_to_revise = coordinate_revision(notes, plan, model=ctx["models"]["team_lead"])
+    # No dedicated UI block for the whole-job coordinator either — fixed on the team-lead tier default.
+    trees_to_revise = coordinate_revision(notes, plan, model=DEFAULT_MODELS["team_lead"])
     for item in trees_to_revise:
         tree_id, tree_notes = item["tree_id"], item["notes"]
         ok = run_tree(ctx, job_id, repo_path, tree_id, plan[tree_id - 1], job_branch, job_wt_path,

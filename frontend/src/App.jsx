@@ -6,7 +6,7 @@ import { GATE_MODELS, GATE_ICONS, GATE_DESCRIPTIONS, CAPPED_GATE_TYPES } from ".
 import {
   planProject, submitJob, getJob, stopJob, resumeJob,
   createRepo, startChat, sendChatMessage, startRun, getRunStatus, stopRun,
-  startPathRun, getPathRunStatus, stopPathRun, getModelConfig,
+  startPathRun, getPathRunStatus, stopPathRun, getModelConfig, checkPath,
 } from "./api";
 import { estimatePlan, formatMinutes } from "./estimate";
 import "./App.css";
@@ -16,8 +16,42 @@ const STATUS_LABELS = {
   queued: "Queued", running: "Running", done: "Done", failed: "Failed",
   stopped: "Stopped", stuck: "Stuck",
 };
-const DEFAULT_GATE_CAPS = { team_lead: 5, check_and_test: 5, auditor: 5 };
 const LAST_JOB_KEY = "swarm_last_job_id";
+
+// The planner suggests complexity/models/caps/instructions per TREE (not per exact block instance) —
+// keeps its output schema a sane size instead of asking it to reason about e.g. "tree_2_dev_1 vs
+// tree_2_dev_2" separately when devs in the same tree are usually interchangeable in difficulty. This
+// expands those tree-level suggestions into the actual block-keyed dicts the rest of the UI already
+// uses — every value is still individually editable afterward via that block's own info modal, this
+// just picks a sensible starting point instead of always falling back to the flat defaults.
+function expandPlanSuggestions(trees, auditor) {
+  const models = {};
+  const caps = {};
+  const instructions = {};
+  trees.forEach((tree, i) => {
+    const treeId = i + 1;
+    const tlBlock = `tree_${treeId}_team_lead`;
+    const cntBlock = `tree_${treeId}_check_and_test`;
+    const numDevs = Math.max(1, tree.num_devs || 1);
+
+    if (tree.team_lead_model) models[tlBlock] = tree.team_lead_model;
+    if (tree.check_and_test_model) models[cntBlock] = tree.check_and_test_model;
+    if (tree.team_lead_cap) caps[tlBlock] = tree.team_lead_cap;
+    if (tree.check_and_test_cap) caps[cntBlock] = tree.check_and_test_cap;
+    if (tree.team_lead_instructions) instructions[tlBlock] = tree.team_lead_instructions;
+    if (tree.check_and_test_instructions) instructions[cntBlock] = tree.check_and_test_instructions;
+
+    for (let d = 1; d <= numDevs; d++) {
+      const devBlock = `tree_${treeId}_dev_${d}`;
+      if (tree.dev_model) models[devBlock] = tree.dev_model;
+      if (tree.dev_instructions) instructions[devBlock] = tree.dev_instructions;
+    }
+  });
+  if (auditor.model) models.auditor = auditor.model;
+  if (auditor.cap) caps.auditor = auditor.cap;
+  if (auditor.instructions) instructions.auditor = auditor.instructions;
+  return { models, caps, instructions };
+}
 
 function parseBlockKey(block) {
   if (block === "auditor") return { gateType: "auditor", label: "Auditor" };
@@ -32,6 +66,55 @@ function parseBlockKey(block) {
   return { gateType: rest, label: `Tree ${treeId} — ${rest}` };
 }
 
+// Real path validation has to happen on the server — a browser has no way to know whether a string
+// is an actual directory on whatever machine is running the backend (which is a different machine
+// entirely once this is opened from a phone, or eventually a remote deploy). Debounced so it doesn't
+// fire a check on every keystroke. requireExists=false (create-repo) only checks the string looks
+// like a real absolute path and doesn't collide with an existing *file* — it's fine for the directory
+// itself not to exist yet, that's the point of that field.
+function usePathCheck(path, requireExists = true, delay = 500) {
+  const [status, setStatus] = useState(null);
+  useEffect(() => {
+    if (!path || !path.trim()) {
+      setStatus(null);
+      return undefined;
+    }
+    setStatus((prev) => ({ ...(prev || {}), checking: true }));
+    const timer = setTimeout(async () => {
+      try {
+        const result = await checkPath(path);
+        if (requireExists) {
+          setStatus({
+            checking: false, valid: result.is_dir, exists: result.exists,
+            message: result.is_dir
+              ? (result.is_git_repo ? "Valid directory (git repo)" : "Valid directory (not a git repo yet)")
+              : (result.exists ? "That path exists but isn't a directory" : "That path doesn't exist"),
+          });
+        } else {
+          const conflict = result.exists && !result.is_dir;
+          const valid = result.is_absolute && !conflict;
+          setStatus({
+            checking: false, valid,
+            message: conflict ? "A file already exists at this path"
+              : !result.is_absolute ? "Enter a full absolute path"
+              : result.exists ? "Already exists as a directory" : "Looks good — will be created",
+          });
+        }
+      } catch {
+        setStatus({ checking: false, valid: false, message: "Couldn't reach the backend to check this path" });
+      }
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [path, requireExists, delay]);
+  return status;
+}
+
+function PathStatus({ status }) {
+  if (!status) return null;
+  if (status.checking) return <p className="path-status path-status-checking">checking...</p>;
+  return <p className={`path-status ${status.valid ? "path-status-ok" : "path-status-bad"}`}>{status.message}</p>;
+}
+
 function App() {
   // --- pre-run planning state ---
   const [prompt, setPrompt] = useState("");
@@ -40,9 +123,15 @@ function App() {
   const [plan, setPlan] = useState(null); // null = not planned yet; array of trees once planned
   const [planLoading, setPlanLoading] = useState(false);
   const [planError, setPlanError] = useState("");
+  // repoPath is shared by PlanForm and ChatPanel, so validate it once here rather than duplicating
+  // the debounced check (and the API calls it fires) in each place that displays it.
+  const repoPathStatus = usePathCheck(repoPath, true);
 
   const [maxCost, setMaxCost] = useState(1.0);
-  const [gateCaps, setGateCaps] = useState(DEFAULT_GATE_CAPS);
+  // Both keyed by exact block label now (e.g. "tree_2_team_lead", "auditor") — each gate instance
+  // has its own cap/model, not one shared per gate type across every tree. Seeded from the planner's
+  // suggestions once a plan comes back (see handlePlan) rather than a flat default.
+  const [gateCaps, setGateCaps] = useState({});
   const [blockInstructions, setBlockInstructions] = useState({});
   const [startError, setStartError] = useState("");
   const [starting, setStarting] = useState(false); // guards against a double-click firing /jobs twice
@@ -69,6 +158,7 @@ function App() {
   // --- create-repo (stacked modal, doesn't close Boot-up) ---
   const [createRepoOpen, setCreateRepoOpen] = useState(false);
   const [createRepoPath, setCreateRepoPath] = useState("");
+  const createRepoPathStatus = usePathCheck(createRepoPath, false); // shared by modal + home card
   const [createRepoGithub, setCreateRepoGithub] = useState(false);
   const [createRepoLoading, setCreateRepoLoading] = useState(false);
   const [createRepoError, setCreateRepoError] = useState("");
@@ -103,7 +193,7 @@ function App() {
     setRepoPath("");
     setPlannerInstructions("");
     setBlockInstructions({});
-    setGateCaps(DEFAULT_GATE_CAPS);
+    setGateCaps({});
     setBlockModels(modelConfig?.default_models || {});
   }
 
@@ -137,8 +227,8 @@ function App() {
   function openModal(block) {
     setDraftInstructions(blockInstructions[block] || "");
     const { gateType } = parseBlockKey(block);
-    setDraftCap(gateCaps[gateType] ?? 5);
-    setDraftModel(blockModels[gateType] || modelConfig?.default_models?.[gateType] || "");
+    setDraftCap(gateCaps[block] ?? 5);
+    setDraftModel(blockModels[block] || modelConfig?.default_models?.[gateType] || "");
     setActiveModal(block);
   }
 
@@ -155,10 +245,10 @@ function App() {
     });
     const { gateType } = parseBlockKey(activeModal);
     if (CAPPED_GATE_TYPES.includes(gateType)) {
-      setGateCaps((prev) => ({ ...prev, [gateType]: Math.max(1, draftCap) }));
+      setGateCaps((prev) => ({ ...prev, [activeModal]: Math.max(1, draftCap) }));
     }
     if (draftModel) {
-      setBlockModels((prev) => ({ ...prev, [gateType]: draftModel }));
+      setBlockModels((prev) => ({ ...prev, [activeModal]: draftModel }));
     }
     setActiveModal(null);
   }
@@ -168,12 +258,22 @@ function App() {
       setPlanError("Prompt and repo path are required.");
       return;
     }
+    if (!repoPathStatus?.valid) {
+      setPlanError("That repo path doesn't look valid — " + (repoPathStatus?.message || "check it and try again") + ".");
+      return;
+    }
     setPlanError("");
     setPlanLoading(true);
     try {
       const plannerModel = blockModels.planner || modelConfig?.default_models?.planner;
-      const trees = await planProject({ prompt, repoPath, instructions: plannerInstructions, model: plannerModel });
-      setPlan(trees);
+      const result = await planProject({ prompt, repoPath, instructions: plannerInstructions, model: plannerModel });
+      setPlan(result.trees);
+      const { models, caps, instructions } = expandPlanSuggestions(result.trees, {
+        model: result.auditor_model, cap: result.auditor_cap, instructions: result.auditor_instructions,
+      });
+      setBlockModels((prev) => ({ ...prev, ...models }));
+      setGateCaps((prev) => ({ ...prev, ...caps }));
+      setBlockInstructions((prev) => ({ ...prev, ...instructions }));
     } catch (err) {
       setPlanError(err.message);
     } finally {
@@ -205,7 +305,7 @@ function App() {
 
   function addTree() {
     setPlan((prev) => (prev.length >= 4 ? prev : [...prev,
-      { summary: "New tree", subtasks: [{ task: "", acceptance: "" }], num_devs: 1 }]));
+      { summary: "New tree", subtasks: [{ task: "", acceptance: "" }], num_devs: 1, complexity: "medium" }]));
   }
 
   function removeTree(index) {
@@ -243,6 +343,10 @@ function App() {
   async function handleCreateRepo() {
     if (!createRepoPath.trim()) {
       setCreateRepoError("Enter a path.");
+      return;
+    }
+    if (!createRepoPathStatus?.valid) {
+      setCreateRepoError(createRepoPathStatus?.message || "That doesn't look like a valid path.");
       return;
     }
     setCreateRepoError("");
@@ -318,7 +422,8 @@ function App() {
 
               <div className="side-card">
                 <h3>Ask about your code</h3>
-                <ChatPanel repoPath={repoPath} setRepoPath={setRepoPath} onUsePrompt={handleUsePrompt} />
+                <ChatPanel repoPath={repoPath} setRepoPath={setRepoPath} onUsePrompt={handleUsePrompt}
+                  pathStatus={repoPathStatus} />
               </div>
 
               <div className="side-row-half">
@@ -333,6 +438,7 @@ function App() {
                     github={createRepoGithub} setGithub={setCreateRepoGithub}
                     loading={createRepoLoading} error={createRepoError}
                     onSubmit={handleCreateRepo} compact
+                    pathStatus={createRepoPathStatus}
                   />
                 </div>
               </div>
@@ -356,6 +462,7 @@ function App() {
               plannerModel={blockModels.planner || modelConfig?.default_models?.planner || ""}
               setPlannerModel={(m) => setBlockModels((prev) => ({ ...prev, planner: m }))}
               claudeModels={modelConfig?.claude_models || []}
+              pathStatus={repoPathStatus}
             />
           ) : (
             <PlanReview
@@ -363,6 +470,7 @@ function App() {
               onUpdateTree={updateTree} onUpdateSubtask={updateSubtask} onAddSubtask={addSubtask}
               onRemoveSubtask={removeSubtask} onAddTree={addTree} onRemoveTree={removeTree}
               onReplan={() => setPlan(null)} onStart={handleStart} starting={starting}
+              gateCaps={gateCaps} blockModels={blockModels} modelConfig={modelConfig}
             />
           )}
         </Modal>
@@ -375,6 +483,7 @@ function App() {
             github={createRepoGithub} setGithub={setCreateRepoGithub}
             loading={createRepoLoading} error={createRepoError}
             onSubmit={handleCreateRepo}
+            pathStatus={createRepoPathStatus}
           />
         </Modal>
       )}
@@ -455,7 +564,7 @@ function StatusBar({ job, onStop, onOpenDetail }) {
 }
 
 function PlanForm({ prompt, setPrompt, repoPath, setRepoPath, plannerInstructions, setPlannerInstructions,
-  planLoading, planError, onPlan, onOpenCreateRepo, plannerModel, setPlannerModel, claudeModels }) {
+  planLoading, planError, onPlan, onOpenCreateRepo, plannerModel, setPlannerModel, claudeModels, pathStatus }) {
   return (
     <>
       <label>What do you want built?</label>
@@ -466,6 +575,7 @@ function PlanForm({ prompt, setPrompt, repoPath, setRepoPath, plannerInstruction
         <button className="btn-link" onClick={onOpenCreateRepo}>+ create new repo</button>
       </div>
       <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="C:\path\to\your\project" />
+      <PathStatus status={pathStatus} />
       <label>Instructions for the planner (optional)</label>
       <textarea value={plannerInstructions} onChange={(e) => setPlannerInstructions(e.target.value)}
         placeholder="e.g. Keep this to 1 tree, don't over-split" />
@@ -478,14 +588,14 @@ function PlanForm({ prompt, setPrompt, repoPath, setRepoPath, plannerInstruction
         </>
       )}
       {planError && <p className="error-text">{planError}</p>}
-      <button className="btn-primary btn-start" onClick={onPlan} disabled={planLoading}>
+      <button className="btn-primary btn-start" onClick={onPlan} disabled={planLoading || !pathStatus?.valid}>
         {planLoading ? "Planning..." : "Plan"}
       </button>
     </>
   );
 }
 
-function ChatPanel({ repoPath, setRepoPath, onUsePrompt, onBack }) {
+function ChatPanel({ repoPath, setRepoPath, onUsePrompt, onBack, pathStatus }) {
   const [chatId, setChatId] = useState(null);
   const [turns, setTurns] = useState([]);
   const [message, setMessage] = useState("");
@@ -500,6 +610,10 @@ function ChatPanel({ repoPath, setRepoPath, onUsePrompt, onBack }) {
   async function handleStartChat() {
     if (!repoPath.trim()) {
       setError("Enter a repo path first.");
+      return;
+    }
+    if (!pathStatus?.valid) {
+      setError(pathStatus?.message || "That repo path doesn't look valid.");
       return;
     }
     setError("");
@@ -541,8 +655,9 @@ function ChatPanel({ repoPath, setRepoPath, onUsePrompt, onBack }) {
         <>
           <label>Repo path</label>
           <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="C:\path\to\your\project" />
+          <PathStatus status={pathStatus} />
           {error && <p className="error-text">{error}</p>}
-          <button className="btn-primary btn-start" onClick={handleStartChat} disabled={loading}>
+          <button className="btn-primary btn-start" onClick={handleStartChat} disabled={loading || !pathStatus?.valid}>
             {loading ? "Starting..." : "Start chat"}
           </button>
         </>
@@ -594,7 +709,7 @@ function ChatTurn({ turn, onUsePrompt }) {
   return <div className={`chat-turn chat-turn-${turn.role}`}>{turn.text}</div>;
 }
 
-function CreateRepoFields({ path, setPath, github, setGithub, loading, error, onSubmit, compact = false }) {
+function CreateRepoFields({ path, setPath, github, setGithub, loading, error, onSubmit, compact = false, pathStatus }) {
   return (
     <>
       {!compact && (
@@ -603,12 +718,13 @@ function CreateRepoFields({ path, setPath, github, setGithub, loading, error, on
       )}
       <label>Path</label>
       <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="C:\path\to\new\project" />
+      <PathStatus status={pathStatus} />
       <label className="checkbox-label">
         <input type="checkbox" checked={github} onChange={(e) => setGithub(e.target.checked)} disabled />
         Also create on GitHub and sync (coming soon)
       </label>
       {error && <p className="error-text">{error}</p>}
-      <button className="btn-primary btn-start" onClick={onSubmit} disabled={loading}>
+      <button className="btn-primary btn-start" onClick={onSubmit} disabled={loading || !pathStatus?.valid}>
         {loading ? "Creating..." : "Create repo"}
       </button>
     </>
@@ -616,11 +732,16 @@ function CreateRepoFields({ path, setPath, github, setGithub, loading, error, on
 }
 
 function PlanReview({ plan, maxCost, setMaxCost, startError, onUpdateTree, onUpdateSubtask,
-  onAddSubtask, onRemoveSubtask, onAddTree, onRemoveTree, onReplan, onStart, starting }) {
-  const estimate = useMemo(() => estimatePlan(plan), [plan]);
+  onAddSubtask, onRemoveSubtask, onAddTree, onRemoveTree, onReplan, onStart, starting,
+  gateCaps, blockModels, modelConfig }) {
+  const estimate = useMemo(() => estimatePlan(plan, {
+    gateCaps, blockModels, defaultModels: modelConfig?.default_models, pricing: modelConfig?.pricing,
+  }), [plan, gateCaps, blockModels, modelConfig]);
   return (
     <>
-      <p className="role-desc">Review the plan Claude came up with — edit anything, then confirm to start.</p>
+      <p className="role-desc">Review the plan Claude came up with — edit anything, then confirm to start.
+        Each tree's Team Lead/Dev/Check &amp; Test blocks in the diagram behind this now carry their own
+        suggested model, retry cap, and instructions — click a block's info icon to see or change them.</p>
       {estimate && (
         <div className="estimate-card">
           <div className="estimate-item">
@@ -632,13 +753,20 @@ function PlanReview({ plan, maxCost, setMaxCost, startError, onUpdateTree, onUpd
             <span className="estimate-label">Est. time</span>
             <span className="estimate-value">{formatMinutes(estimate.timeLow)} – {formatMinutes(estimate.timeHigh)}</span>
           </div>
-          <p className="estimate-note">Rough heuristic, not a bill — low end assumes a clean run, high end assumes a couple of gate rejections.</p>
+          <p className="estimate-note">Rough heuristic, not a bill — accounts for each tree's suggested
+            complexity, whichever models are actually selected, and the retry caps set per block. Low
+            end assumes a clean run, high end assumes real iteration on the harder trees.</p>
         </div>
       )}
       {plan.map((tree, i) => (
         <div className="tree-plan-card" key={i}>
           <div className="tree-plan-header">
-            <strong>Tree {i + 1}</strong>
+            <div className="tree-plan-title">
+              <strong>Tree {i + 1}</strong>
+              <span className={`complexity-badge complexity-${tree.complexity || "medium"}`}>
+                {tree.complexity || "medium"}
+              </span>
+            </div>
             {plan.length > 1 && <button className="btn-link" onClick={() => onRemoveTree(i)}>remove</button>}
           </div>
           <label>Summary / scope</label>
@@ -692,7 +820,7 @@ function BlockModal({ block, onClose, jobId, draftInstructions, setDraftInstruct
             placeholder="e.g. Only touch primes.py" />
           {modelOptions && modelOptions.length > 0 && (
             <>
-              <label>Model (shared across every tree's {label.split(" — ").pop()})</label>
+              <label>Model for this block</label>
               <select value={draftModel} onChange={(e) => setDraftModel(e.target.value)}>
                 {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
@@ -700,7 +828,7 @@ function BlockModal({ block, onClose, jobId, draftInstructions, setDraftInstruct
           )}
           {capped && (
             <>
-              <label>Max retries before stuck (shared across every tree's {label.split(" — ").pop()})</label>
+              <label>Max retries before stuck (this block only)</label>
               <input type="number" min="1" max="20" value={draftCap} onChange={(e) => setDraftCap(Number(e.target.value))} />
             </>
           )}
@@ -708,8 +836,8 @@ function BlockModal({ block, onClose, jobId, draftInstructions, setDraftInstruct
       ) : (
         <>
           {savedInstructions && <p><strong>Your instructions:</strong> {savedInstructions}</p>}
-          <p><strong>Model:</strong> {blockModels[gateType] || modelConfig?.default_models?.[gateType] || "default"}</p>
-          {capped && <p><strong>Retry cap:</strong> {gateCaps[gateType]}</p>}
+          <p><strong>Model:</strong> {blockModels[block] || modelConfig?.default_models?.[gateType] || "default"}</p>
+          {capped && <p><strong>Retry cap:</strong> {gateCaps[block] ?? "default"}</p>}
           <p><strong>State:</strong> {blockStatus?.state || "pending"}</p>
           <p><strong>Current task:</strong> {blockStatus?.activity || "(nothing yet)"}</p>
         </>
@@ -837,6 +965,7 @@ function HomeRunCard() {
   // Standalone from any job — points at any local project, same detect-and-launch logic RunBox
   // uses for a finished job's own worktree, just against a path you type in directly.
   const [path, setPath] = useState("");
+  const pathStatus = usePathCheck(path, true);
   const [runId, setRunId] = useState(null);
   const [runState, setRunState] = useState(null);
   const [starting, setStarting] = useState(false);
@@ -848,6 +977,10 @@ function HomeRunCard() {
   async function handleRun() {
     if (!path.trim()) {
       setError("Enter a project path first.");
+      return;
+    }
+    if (!pathStatus?.valid) {
+      setError(pathStatus?.message || "That path doesn't look valid.");
       return;
     }
     setError("");
@@ -891,8 +1024,9 @@ function HomeRunCard() {
         <>
           <label>Path</label>
           <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="C:\path\to\a\project" />
+          <PathStatus status={pathStatus} />
           {error && <p className="error-text">{error}</p>}
-          <button className="btn-primary btn-start" onClick={handleRun} disabled={starting}>
+          <button className="btn-primary btn-start" onClick={handleRun} disabled={starting || !pathStatus?.valid}>
             {starting ? "Starting..." : "▶ Run app"}
           </button>
         </>

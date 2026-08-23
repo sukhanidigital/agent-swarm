@@ -3,12 +3,13 @@
 the job engine and doesn't serve any frontend assets itself."""
 import threading
 import uuid
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from orchestrator import chat, runner, store
+from orchestrator import chat, cost, runner, store
 from orchestrator.agents import CLAUDE_MODELS, DEFAULT_MODELS, OPENAI_MODELS, PROVIDERS, plan_project
 from orchestrator.git_tools import init_repo
 from orchestrator.pipeline import repo_listing, resume_job, run_job
@@ -41,8 +42,10 @@ class JobRequest(BaseModel):
     plan: list[Tree]  # the (possibly user-edited) plan returned by /plan, confirmed by the user
     block_instructions: dict[str, str] = {}  # keys: planner, tree_1_team_lead, tree_1_dev_1, auditor, ...
     max_cost: float = 1.0
-    gate_caps: dict[str, int] = store.DEFAULT_GATE_CAPS  # keys: team_lead, check_and_test, auditor
-    models: dict[str, str] = {}  # keys: team_lead, dev, check_and_test, auditor (planner is fixed at /plan time)
+    # Both keyed by exact block label now (e.g. "tree_1_team_lead", "tree_2_check_and_test", "auditor")
+    # — each gate instance has its own cap/model, not one shared per gate type across every tree.
+    gate_caps: dict[str, int] = {}
+    models: dict[str, str] = {}
 
 
 class ResumeRequest(BaseModel):
@@ -66,6 +69,25 @@ class RunRequest(BaseModel):
     path: str
 
 
+@app.get("/check-path")
+def check_path(path: str):
+    """A path field only knows what the *browser's* machine can see — but the paths typed in here
+    (repo path, run path, create-repo path) are resolved on whatever machine runs this backend, which
+    is a different machine entirely once this is opened from a phone or a remote deploy. There's no
+    way to validate a path is real without asking the server that actually owns the filesystem, so the
+    frontend calls this instead of trying to guess with a regex."""
+    try:
+        p = Path(path)
+        exists = p.exists()
+        is_dir = p.is_dir() if exists else False
+        is_git_repo = (p / ".git").exists() if is_dir else False
+        is_absolute = p.is_absolute()
+    except (OSError, ValueError):
+        # a malformed string (stray null byte, reserved device name, etc.) — not a real path at all
+        return {"exists": False, "is_dir": False, "is_git_repo": False, "is_absolute": False}
+    return {"exists": exists, "is_dir": is_dir, "is_git_repo": is_git_repo, "is_absolute": is_absolute}
+
+
 @app.get("/models")
 def list_models():
     """Backend is the single source of truth for which models exist and which provider each gate
@@ -74,6 +96,8 @@ def list_models():
     return {
         "providers": PROVIDERS, "default_models": DEFAULT_MODELS,
         "claude_models": CLAUDE_MODELS, "openai_models": OPENAI_MODELS,
+        "pricing": cost.PRICING,  # lets the frontend's cost estimate react to whichever model is
+                                  # actually selected per block, not just a flat guess
     }
 
 
@@ -81,13 +105,17 @@ def list_models():
 def plan(req: PlanRequest):
     """Stateless — the top-level Sonnet planning call, run before any job exists so you can review
     and edit the tree/dev breakdown before committing to it. No job or cost is recorded here beyond
-    this one call; the confirmed plan gets POSTed back as part of /jobs to actually start a run."""
+    this one call; the confirmed plan gets POSTed back as part of /jobs to actually start a run.
+
+    The response carries more than just trees now — each tree also has a suggested complexity,
+    per-role models, retry caps, and instructions, plus top-level auditor suggestions. All of it is a
+    starting point the UI pre-fills and the user can freely edit; nothing here is binding."""
     try:
-        trees = plan_project(req.prompt, repo_listing(req.repo_path), instructions=req.instructions,
-                              model=req.model)
+        result = plan_project(req.prompt, repo_listing(req.repo_path), instructions=req.instructions,
+                               model=req.model)
     except Exception as exc:  # noqa: BLE001 - surface planning failures (bad repo path, bad JSON) to the UI
         raise HTTPException(400, f"Planning failed: {exc}")
-    return {"trees": trees}
+    return result
 
 
 @app.post("/jobs")
