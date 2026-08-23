@@ -1,0 +1,7 @@
+frontend
+.git
+jobs
+env
+__pycache__
+*.pyc
+.env

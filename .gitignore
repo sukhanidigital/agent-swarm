@@ -4,3 +4,4 @@ __pycache__/
 jobs/swarm.db
 jobs/worktrees/
 *.pyc
+repos/
