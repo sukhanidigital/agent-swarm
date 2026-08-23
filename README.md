@@ -96,5 +96,8 @@ nothing else in the pipeline depends on it.
 
 - `jobs/swarm.db` (SQLite job history) and `jobs/worktrees/` (per-run git worktrees) are gitignored —
   they're local runtime state, not part of the tool itself.
-- This is Phase 1 (local-only). Phase 2 adds cloud (EC2) deployment + auth; Phase 3 adds native
-  mobile/desktop clients over this same FastAPI backend.
+- Phase 2 (cloud deployment + auth) and Phase 3 (native mobile client) are both done: see
+  [`DEPLOY.md`](DEPLOY.md) for running this on AWS EC2 behind nginx + TLS with API key auth
+  (`api/auth.py`), and [`frontend/MOBILE.md`](frontend/MOBILE.md) for building the iOS/Android app
+  (Capacitor, same React codebase — `frontend/android/`, `frontend/ios/`). Still Phase 1-friendly:
+  running everything locally with no `API_KEY` set works exactly as before.
