@@ -60,7 +60,7 @@ function App() {
   const [draftModel, setDraftModel] = useState("");
 
   useEffect(() => {
-    if (!isConfigured()) return; // nothing to fetch yet — Settings forces itself open in this case
+    if (!isConfigured()) return; // nothing to fetch yet — the login screen replaces the whole app in this case
     getModelConfig().then((cfg) => {
       setModelConfig(cfg);
       setBlockModels(cfg.default_models);
@@ -69,10 +69,41 @@ function App() {
     });
   }, []);
 
-  // --- settings (API URL + key) — forced open on first run if nothing's configured yet, since
-  // every other request in this app would otherwise fire against an empty/wrong URL. Reachable again
-  // afterward via the gear button next to Agent Library, for switching backends or rotating the key. ---
-  const [settingsOpen, setSettingsOpen] = useState(() => !isConfigured());
+  // --- auth gate — a dedicated full-page login screen replaces the *entire* app (nothing else in
+  // this component's tree mounts) until both a URL and key are on record, so there's no way to glimpse
+  // any app content, even briefly, without the key. Distinct from `settingsOpen` below, which is the
+  // already-authed path for switching backends or rotating the key later via the gear button. ---
+  const [authed, setAuthed] = useState(() => isConfigured());
+  const [loginUrl, setLoginUrl] = useState(() => getApiUrl());
+  const [loginKey, setLoginKey] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loginChecking, setLoginChecking] = useState(false);
+
+  function handleLogin() {
+    const url = loginUrl.trim();
+    const key = loginKey.trim();
+    if (!url || !key) {
+      setLoginError("Both the API URL and key are required.");
+      return;
+    }
+    setLoginError("");
+    setLoginChecking(true);
+    setApiUrl(url);
+    setApiKey(key);
+    getModelConfig().then((cfg) => {
+      setModelConfig(cfg);
+      setBlockModels(cfg.default_models);
+      setAuthed(true);
+    }).catch(() => {
+      setApiUrl("");
+      setApiKey("");
+      setLoginError("Couldn't reach that backend with that key — check both and try again.");
+    }).finally(() => setLoginChecking(false));
+  }
+
+  // --- settings (API URL + key), reachable via the gear button once already authed — for switching
+  // backends or rotating the key. ---
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [draftApiUrl, setDraftApiUrl] = useState(() => getApiUrl());
   const [draftApiKey, setDraftApiKey] = useState(() => getApiKey());
 
@@ -304,6 +335,19 @@ function App() {
   }
 
   const blockStatus = job?.block_status || {};
+
+  // Placed after every hook in this component has run (Rules of Hooks) — replaces the entire app
+  // tree below with a dedicated full-page login, nothing else in this component mounts until authed.
+  if (!authed) {
+    return (
+      <LoginScreen
+        apiUrl={loginUrl} setApiUrl={setLoginUrl}
+        apiKey={loginKey} setApiKey={setLoginKey}
+        error={loginError} checking={loginChecking}
+        onLogin={handleLogin}
+      />
+    );
+  }
 
   return (
     <div className="app">
@@ -1010,6 +1054,33 @@ function HomeRunCard() {
           {error && <p className="error-text">{error}</p>}
         </>
       )}
+    </div>
+  );
+}
+
+function LoginScreen({ apiUrl, setApiUrl, apiKey, setApiKey, error, checking, onLogin }) {
+  function handleSubmit(e) {
+    e.preventDefault();
+    onLogin();
+  }
+
+  return (
+    <div className="login-screen">
+      <form className="login-card side-card" onSubmit={handleSubmit}>
+        <div className="brand login-brand"><Icon name="rocket" size={22} /> <span>Agent Swarm</span></div>
+        <p className="role-desc">Sign in with your backend's URL and API key. Nothing else in this
+          app loads until both check out.</p>
+        <label>API URL</label>
+        <input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} autoFocus
+          placeholder="https://your-domain.example.com" />
+        <label>API key</label>
+        <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+          placeholder="required" />
+        <button type="submit" className="btn-primary btn-start" disabled={checking}>
+          {checking ? "Checking..." : "Log in"}
+        </button>
+        {error && <p className="error-text">{error}</p>}
+      </form>
     </div>
   );
 }

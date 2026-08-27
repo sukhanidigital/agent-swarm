@@ -64,6 +64,30 @@ body::before {
   z-index: 1;
 }
 
+/* ---- full-page login gate ---- */
+
+.login-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  position: relative;
+  z-index: 1;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+}
+
+.login-brand {
+  justify-content: center;
+  margin-bottom: 0.4rem;
+}
+
 /* ---- header ---- */
 
 .app-header {
