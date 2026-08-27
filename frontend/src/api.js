@@ -18,6 +18,12 @@ function jsonFetch(path, body) {
   });
 }
 
+export async function login({ email, password }) {
+  const res = await jsonFetch("/login", { email, password });
+  if (!res.ok) throw new Error(`Couldn't log in: ${await res.text()}`);
+  return res.json(); // { api_key }
+}
+
 export async function getModelConfig() {
   const res = await apiFetch("/models");
   if (!res.ok) throw new Error(`Couldn't fetch model config: ${await res.text()}`);

@@ -1,6 +1,8 @@
 """FastAPI backend for the swarm — a plain JSON API consumed by the React UI in frontend/
 (run separately via `npm run dev`, see frontend/README or the project README). This process owns
 the job engine and doesn't serve any frontend assets itself."""
+import os
+import secrets
 import threading
 import uuid
 
@@ -14,11 +16,33 @@ from orchestrator.agents import CLAUDE_MODELS, DEFAULT_MODELS, OPENAI_MODELS, PR
 from orchestrator.git_tools import init_repo
 from orchestrator.pipeline import repo_listing, resume_job, run_job
 
-# dependencies=[...] applies to every route below — this backend runs shell/dev-agent commands
-# against whatever repo_path it's given, so once it's reachable from anywhere but localhost every
-# endpoint needs to be behind the same gate. See api/auth.py — it's a no-op until API_KEY is set.
+# dependencies=[...] applies to every route below (except /login, exempted in api/auth.py) — this
+# backend runs shell/dev-agent commands against whatever repo_path it's given, so once it's reachable
+# from anywhere but localhost every endpoint needs to be behind the same gate. See api/auth.py — it's
+# a no-op until API_KEY is set.
 app = FastAPI(title="Agent Swarm", dependencies=[Depends(require_api_key)])
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/login")
+def login(req: LoginRequest):
+    """Exchanges LOGIN_EMAIL/LOGIN_PASSWORD for the real API_KEY, so the frontend's login screen
+    only ever asks for an email/password — never the key itself. No-ops (always succeeds, with
+    whatever API_KEY is or isn't set) if LOGIN_EMAIL/LOGIN_PASSWORD aren't configured, matching every
+    other optional-auth-layer convention in this codebase."""
+    expected_email = os.environ.get("LOGIN_EMAIL")
+    expected_password = os.environ.get("LOGIN_PASSWORD")
+    if expected_email and expected_password:
+        email_ok = secrets.compare_digest(req.email, expected_email)
+        password_ok = secrets.compare_digest(req.password, expected_password)
+        if not (email_ok and password_ok):
+            raise HTTPException(401, "Invalid email or password")
+    return {"api_key": os.environ.get("API_KEY", "")}
 
 
 class PlanRequest(BaseModel):

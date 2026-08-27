@@ -6,7 +6,7 @@ import { GATE_MODELS, GATE_ICONS, GATE_DESCRIPTIONS, CAPPED_GATE_TYPES, PHASE_LA
 import {
   planProject, submitJob, getJob, stopJob, resumeJob,
   createRepo, startChat, sendChatMessage, startRun, getRunStatus, stopRun,
-  startPathRun, getPathRunStatus, stopPathRun, getModelConfig,
+  startPathRun, getPathRunStatus, stopPathRun, getModelConfig, login,
 } from "./api";
 import { estimatePlan, formatMinutes } from "./estimate";
 import { getApiUrl, setApiUrl, getApiKey, setApiKey, isConfigured } from "./config";
@@ -72,32 +72,42 @@ function App() {
   // --- auth gate — a dedicated full-page login screen replaces the *entire* app (nothing else in
   // this component's tree mounts) until both a URL and key are on record, so there's no way to glimpse
   // any app content, even briefly, without the key. Distinct from `settingsOpen` below, which is the
-  // already-authed path for switching backends or rotating the key later via the gear button. ---
+  // already-authed path for switching backends or rotating the key later via the gear button.
+  //
+  // The login screen itself only ever asks for an email + password — the API key is an internal
+  // implementation detail exchanged for those credentials by the backend's /login (see api/main.py),
+  // never typed in or shown. The API URL is resolved automatically (build-time VITE_API_BASE_URL, or
+  // whatever's already in localStorage) and only surfaced as a field if neither of those gave us one
+  // — the true local-dev case config.js's own guessApiUrl() fallback doesn't cover. ---
   const [authed, setAuthed] = useState(() => isConfigured());
   const [loginUrl, setLoginUrl] = useState(() => getApiUrl());
-  const [loginKey, setLoginKey] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [loginChecking, setLoginChecking] = useState(false);
 
   function handleLogin() {
     const url = loginUrl.trim();
-    const key = loginKey.trim();
-    if (!url || !key) {
-      setLoginError("Both the API URL and key are required.");
+    const email = loginEmail.trim();
+    const password = loginPassword.trim();
+    if (!url || !email || !password) {
+      setLoginError("Email and password are required.");
       return;
     }
     setLoginError("");
     setLoginChecking(true);
-    setApiUrl(url);
-    setApiKey(key);
-    getModelConfig().then((cfg) => {
+    setApiUrl(url); // needed before the /login call itself, which reads it via getApiUrl()
+    login({ email, password }).then(({ api_key }) => {
+      setApiKey(api_key);
+      return getModelConfig();
+    }).then((cfg) => {
       setModelConfig(cfg);
       setBlockModels(cfg.default_models);
       setAuthed(true);
     }).catch(() => {
       setApiUrl("");
       setApiKey("");
-      setLoginError("Couldn't reach that backend with that key — check both and try again.");
+      setLoginError("Incorrect email or password.");
     }).finally(() => setLoginChecking(false));
   }
 
@@ -342,7 +352,8 @@ function App() {
     return (
       <LoginScreen
         apiUrl={loginUrl} setApiUrl={setLoginUrl}
-        apiKey={loginKey} setApiKey={setLoginKey}
+        email={loginEmail} setEmail={setLoginEmail}
+        password={loginPassword} setPassword={setLoginPassword}
         error={loginError} checking={loginChecking}
         onLogin={handleLogin}
       />
@@ -1058,7 +1069,12 @@ function HomeRunCard() {
   );
 }
 
-function LoginScreen({ apiUrl, setApiUrl, apiKey, setApiKey, error, checking, onLogin }) {
+function LoginScreen({ apiUrl, setApiUrl, email, setEmail, password, setPassword, error, checking, onLogin }) {
+  // The API URL is resolved automatically in the normal case (build-time VITE_API_BASE_URL, or a
+  // prior session's localStorage) — this field only needs to exist for the true local-dev case where
+  // neither of those gave us anything, so a plain email/password form is what everyone else sees.
+  const needsUrl = !apiUrl;
+
   function handleSubmit(e) {
     e.preventDefault();
     onLogin();
@@ -1068,16 +1084,22 @@ function LoginScreen({ apiUrl, setApiUrl, apiKey, setApiKey, error, checking, on
     <div className="login-screen">
       <form className="login-card side-card" onSubmit={handleSubmit}>
         <div className="brand login-brand"><Icon name="rocket" size={22} /> <span>Agent Swarm</span></div>
-        <p className="role-desc">Sign in with your backend's URL and API key. Nothing else in this
-          app loads until both check out.</p>
-        <label>API URL</label>
-        <input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} autoFocus
-          placeholder="https://your-domain.example.com" />
-        <label>API key</label>
-        <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-          placeholder="required" />
+        <p className="role-desc">Sign in to continue.</p>
+        {needsUrl && (
+          <>
+            <label>API URL</label>
+            <input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)}
+              placeholder="https://your-domain.example.com" />
+          </>
+        )}
+        <label>Email</label>
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+          autoFocus={!needsUrl} placeholder="you@example.com" autoComplete="username" />
+        <label>Password</label>
+        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+          placeholder="required" autoComplete="current-password" />
         <button type="submit" className="btn-primary btn-start" disabled={checking}>
-          {checking ? "Checking..." : "Log in"}
+          {checking ? "Signing in..." : "Log in"}
         </button>
         {error && <p className="error-text">{error}</p>}
       </form>
