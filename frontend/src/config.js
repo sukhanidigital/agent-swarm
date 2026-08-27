@@ -40,7 +40,9 @@ export function setApiKey(key) {
 }
 
 // True once there's enough configured to plausibly reach a backend — used to gate the app behind
-// the Settings screen on first run instead of firing requests at an empty string.
+// the Settings screen on first run instead of firing requests at an empty string. A build-time
+// VITE_API_BASE_URL means the URL is always present on a real deployment, so the key — never baked
+// into the build, always per-device — is what actually has to be present for this to be true.
 export function isConfigured() {
-  return !!getApiUrl();
+  return !!getApiUrl() && !!getApiKey();
 }
