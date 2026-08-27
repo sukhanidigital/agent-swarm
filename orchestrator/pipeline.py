@@ -24,7 +24,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from orchestrator import cost, memory, store
+from orchestrator import cost, memory, notify, store
 from orchestrator.agents import (
     DEFAULT_MODELS,
     audit,
@@ -113,6 +113,7 @@ def _build_context(job_id: str, prompt: str, repo_path: str, config: dict, max_c
     def finish(status: str, stuck_reason: str = None):
         store.update_job(job_id, status=status, stuck_reason=stuck_reason)
         memory.log_job_summary(job_id, repo_path, prompt, status, accumulator.total, sum(gate_attempts.values()))
+        notify.notify_job_finished(job_id, prompt, status, accumulator.total)
 
     def bump(block_label: str, gate_type: str) -> bool:
         """Increment one gate instance's rejection count against its gate-TYPE cap. Returns True if
