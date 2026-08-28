@@ -5,7 +5,7 @@ import Icon from "./components/Icon";
 import { GATE_MODELS, GATE_ICONS, GATE_DESCRIPTIONS, CAPPED_GATE_TYPES, PHASE_LABELS, AGENT_LIBRARY } from "./roles";
 import {
   planProject, submitJob, getJob, stopJob, resumeJob,
-  createRepo, startChat, sendChatMessage, startRun, getRunStatus, stopRun,
+  startChat, sendChatMessage, startRun, getRunStatus, stopRun,
   startPathRun, getPathRunStatus, stopPathRun, getModelConfig, login,
   listProjects, createProject,
 } from "./api";
@@ -148,26 +148,23 @@ function App() {
     });
   }
 
-  // --- create-repo (stacked modal, doesn't close Boot-up) ---
-  const [createRepoOpen, setCreateRepoOpen] = useState(false);
-  const [createRepoPath, setCreateRepoPath] = useState("");
-  const [createRepoGithub, setCreateRepoGithub] = useState(false);
-  const [createRepoLoading, setCreateRepoLoading] = useState(false);
-  const [createRepoError, setCreateRepoError] = useState("");
-
-  // --- projects (stacked modal, reachable from either Boot-up's "Select project" or the home
-  // screen's "Manage projects" — the user-facing replacement for typing/creating a raw repo path;
-  // see PROJECTS_ROOT in api/main.py) ---
+  // --- projects (stacked modal, reachable from Boot-up's "Select project", the "Ask about your
+  // code" chat panel, the home screen's "Manage projects"/"New project", and the standalone Run-task
+  // card — one picker, every consumer supplies its own onSelect so each writes the chosen project
+  // wherever *it* keeps that state (global repoPath for Boot-up/chat, HomeRunCard's own local state
+  // for Run-task) instead of this being hardwired to one of them. See PROJECTS_ROOT in api/main.py. ---
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [projectsMode, setProjectsMode] = useState("list"); // "list" | "create"
   const [projects, setProjects] = useState([]);
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState("");
+  const [projectsOnSelect, setProjectsOnSelect] = useState(null); // (project) => void, set per-open
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectCreating, setNewProjectCreating] = useState(false);
   const [newProjectError, setNewProjectError] = useState("");
 
-  function openProjects() {
+  function openProjects(onSelect) {
+    setProjectsOnSelect(() => onSelect);
     setProjectsMode("list");
     setProjectsOpen(true);
     setProjectsLoading(true);
@@ -176,10 +173,26 @@ function App() {
       .finally(() => setProjectsLoading(false));
   }
 
+  // Same picker, opened straight into the create-name step — for entry points whose whole point is
+  // "make a new one" (the home screen's "New project" card) rather than picking an existing one.
+  function openCreateProject(onSelect) {
+    setProjectsOnSelect(() => onSelect);
+    setProjectsMode("create");
+    setProjectsOpen(true);
+    setNewProjectName("");
+    setNewProjectError("");
+  }
+
   function selectProject(project) {
+    if (projectsOnSelect) projectsOnSelect(project);
+    setProjectsOpen(false);
+  }
+
+  // The common case — Boot-up, the header's "Manage projects", and the chat panel all share the
+  // same global "current project" (repoPath/selectedProjectName), so they all pass this same callback.
+  function selectGlobalProject(project) {
     setRepoPath(project.path);
     setSelectedProjectName(project.name);
-    setProjectsOpen(false);
   }
 
   function startCreateProject() {
@@ -371,28 +384,6 @@ function App() {
     if (!intervalRef.current) startPolling(jobId);
   }
 
-  async function handleCreateRepo() {
-    if (!createRepoPath.trim()) {
-      setCreateRepoError("Enter a path.");
-      return;
-    }
-    setCreateRepoError("");
-    setCreateRepoLoading(true);
-    try {
-      const { path } = await createRepo({ path: createRepoPath, github: createRepoGithub });
-      setRepoPath(path);
-      // this legacy path-based flow has no project name of its own — fall back to the path's last
-      // segment so the Boot-up "Project" button doesn't read "Select project" despite one being set
-      setSelectedProjectName(path.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || path);
-      setCreateRepoOpen(false);
-      setCreateRepoPath("");
-    } catch (err) {
-      setCreateRepoError(err.message);
-    } finally {
-      setCreateRepoLoading(false);
-    }
-  }
-
   function handleUsePrompt(promptText) {
     setPrompt(promptText);
     setPlan(null); // in case a stale plan from a prior prompt was sitting around
@@ -423,7 +414,7 @@ function App() {
             <button className="library-btn" onClick={() => setLibraryOpen(true)} aria-label="Agent Library">
               <Icon name="briefcase" size={15} /> <span className="library-btn-label">Agent Library</span>
             </button>
-            <button className="library-btn" onClick={openProjects} aria-label="Manage projects">
+            <button className="library-btn" onClick={() => openProjects(selectGlobalProject)} aria-label="Manage projects">
               <Icon name="folder" size={15} /> <span className="library-btn-label">Manage projects</span>
             </button>
           </div>
@@ -483,22 +474,21 @@ function App() {
             <div className="side-idle-stack">
               <div className="side-card">
                 <h3>Ask about your code</h3>
-                <ChatPanel repoPath={repoPath} setRepoPath={setRepoPath} onUsePrompt={handleUsePrompt} />
+                <ChatPanel repoPath={repoPath} selectedProjectName={selectedProjectName}
+                  onOpenProjects={() => openProjects(selectGlobalProject)} onUsePrompt={handleUsePrompt} />
               </div>
 
               <div className="side-row-half">
                 <div className="side-card side-half">
                   <h3>Run</h3>
-                  <HomeRunCard />
+                  <HomeRunCard onOpenProjects={openProjects} />
                 </div>
                 <div className="side-card side-half">
-                  <h3>Create repo</h3>
-                  <CreateRepoFields
-                    path={createRepoPath} setPath={setCreateRepoPath}
-                    github={createRepoGithub} setGithub={setCreateRepoGithub}
-                    loading={createRepoLoading} error={createRepoError}
-                    onSubmit={handleCreateRepo} compact
-                  />
+                  <h3>New project</h3>
+                  <p className="role-desc">Start a fresh project — no path, no setup, just a name.</p>
+                  <button className="btn-primary btn-start" onClick={() => openCreateProject(selectGlobalProject)}>
+                    + Create project
+                  </button>
                 </div>
               </div>
             </div>
@@ -514,7 +504,7 @@ function App() {
           ) : !plan ? (
             <PlanForm
               prompt={prompt} setPrompt={setPrompt}
-              selectedProjectName={selectedProjectName} onOpenProjects={openProjects}
+              selectedProjectName={selectedProjectName} onOpenProjects={() => openProjects(selectGlobalProject)}
               plannerInstructions={plannerInstructions} setPlannerInstructions={setPlannerInstructions}
               planLoading={planLoading} planError={planError} onPlan={handlePlan}
               plannerModel={blockModels.planner || modelConfig?.default_models?.planner || ""}
@@ -532,17 +522,6 @@ function App() {
         </Modal>
       )}
 
-      {createRepoOpen && (
-        <Modal title="Create a new repo" onClose={() => setCreateRepoOpen(false)}>
-          <CreateRepoFields
-            path={createRepoPath} setPath={setCreateRepoPath}
-            github={createRepoGithub} setGithub={setCreateRepoGithub}
-            loading={createRepoLoading} error={createRepoError}
-            onSubmit={handleCreateRepo}
-          />
-        </Modal>
-      )}
-
       {libraryOpen && (
         <AgentLibraryModal plan={plan} onClose={() => setLibraryOpen(false)} onStartWizard={startWizard} />
       )}
@@ -552,7 +531,8 @@ function App() {
           mode={projectsMode} projects={projects} loading={projectsLoading} error={projectsError}
           newProjectName={newProjectName} setNewProjectName={setNewProjectName}
           newProjectCreating={newProjectCreating} newProjectError={newProjectError}
-          onSelect={selectProject} onStartCreate={startCreateProject} onBackToList={() => setProjectsMode("list")}
+          onSelect={selectProject} onStartCreate={startCreateProject}
+          onBackToList={() => openProjects(projectsOnSelect)}
           onCreate={handleCreateProject} onClose={() => setProjectsOpen(false)}
         />
       )}
@@ -691,7 +671,7 @@ function PlanForm({ prompt, setPrompt, selectedProjectName, onOpenProjects, plan
   );
 }
 
-function ChatPanel({ repoPath, setRepoPath, onUsePrompt, onBack }) {
+function ChatPanel({ repoPath, selectedProjectName, onOpenProjects, onUsePrompt, onBack }) {
   const [chatId, setChatId] = useState(null);
   const [turns, setTurns] = useState([]);
   const [message, setMessage] = useState("");
@@ -705,7 +685,7 @@ function ChatPanel({ repoPath, setRepoPath, onUsePrompt, onBack }) {
 
   async function handleStartChat() {
     if (!repoPath.trim()) {
-      setError("Enter a repo path first.");
+      setError("Select a project first.");
       return;
     }
     setError("");
@@ -745,8 +725,11 @@ function ChatPanel({ repoPath, setRepoPath, onUsePrompt, onBack }) {
         what you want, and when it's ready it'll propose a build prompt you can send to the planner.</p>
       {!chatId ? (
         <>
-          <label>Repo path</label>
-          <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="C:\path\to\your\project" />
+          <label>Project</label>
+          <button type="button" className="project-picker-btn" onClick={onOpenProjects}>
+            <Icon name="folder" size={16} />
+            <span>{selectedProjectName || "Select project"}</span>
+          </button>
           {error && <p className="error-text">{error}</p>}
           <button className="btn-primary btn-start" onClick={handleStartChat} disabled={loading}>
             {loading ? "Starting..." : "Start chat"}
@@ -798,27 +781,6 @@ function ChatTurn({ turn, onUsePrompt }) {
     );
   }
   return <div className={`chat-turn chat-turn-${turn.role}`}>{turn.text}</div>;
-}
-
-function CreateRepoFields({ path, setPath, github, setGithub, loading, error, onSubmit, compact = false }) {
-  return (
-    <>
-      {!compact && (
-        <p className="role-desc">Runs a plain <code>git init</code> at this path (plus a starter
-          commit, needed before a job can branch off it) — doesn't touch any files already there.</p>
-      )}
-      <label>Path</label>
-      <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="C:\path\to\new\project" />
-      <label className="checkbox-label">
-        <input type="checkbox" checked={github} onChange={(e) => setGithub(e.target.checked)} disabled />
-        Also create on GitHub and sync (coming soon)
-      </label>
-      {error && <p className="error-text">{error}</p>}
-      <button className="btn-primary btn-start" onClick={onSubmit} disabled={loading}>
-        {loading ? "Creating..." : "Create repo"}
-      </button>
-    </>
-  );
 }
 
 function ProjectsModal({ mode, projects, loading, error, newProjectName, setNewProjectName,
@@ -1095,10 +1057,13 @@ function RunBox({ jobId }) {
   );
 }
 
-function HomeRunCard() {
-  // Standalone from any job — points at any local project, same detect-and-launch logic RunBox
-  // uses for a finished job's own worktree, just against a path you type in directly.
+function HomeRunCard({ onOpenProjects }) {
+  // Standalone from any job — points at any project, same detect-and-launch logic RunBox uses for a
+  // finished job's own worktree, just picked directly rather than tied to a run. Its own local
+  // project selection (path + display name), independent of Boot-up/chat's shared one — running an
+  // app doesn't imply you want it as your next build target too.
   const [path, setPath] = useState("");
+  const [projectName, setProjectName] = useState("");
   const [runId, setRunId] = useState(null);
   const [runState, setRunState] = useState(null);
   const [starting, setStarting] = useState(false);
@@ -1107,9 +1072,14 @@ function HomeRunCard() {
 
   useEffect(() => () => { if (intervalRef.current) clearInterval(intervalRef.current); }, []);
 
+  function selectProject(project) {
+    setPath(project.path);
+    setProjectName(project.name);
+  }
+
   async function handleRun() {
     if (!path.trim()) {
-      setError("Enter a project path first.");
+      setError("Select a project first.");
       return;
     }
     setError("");
@@ -1151,8 +1121,11 @@ function HomeRunCard() {
     <div className="run-box run-box-compact">
       {!runState ? (
         <>
-          <label>Path</label>
-          <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="C:\path\to\a\project" />
+          <label>Project</label>
+          <button type="button" className="project-picker-btn" onClick={() => onOpenProjects(selectProject)}>
+            <Icon name="folder" size={16} />
+            <span>{projectName || "Select project"}</span>
+          </button>
           {error && <p className="error-text">{error}</p>}
           <button className="btn-primary btn-start" onClick={handleRun} disabled={starting}>
             {starting ? "Starting..." : "▶ Run app"}
