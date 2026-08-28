@@ -112,6 +112,24 @@ to be able to run the code too, so follow this convention rather than installing
   that's what lets a later reviewer in a fresh worktree recreate the same environment
   (`.venv\\Scripts\\pip install -r requirements.txt`) instead of guessing what's needed."""
 
+# Recurring categories of thing a quality-gate rejection catches reactively when they could've been
+# gotten right the first time — every retry round re-runs the *dev* agents (the expensive tool-calling
+# part), so catching these upfront instead of after a rejection is a real cost lever, not just a
+# quality one. Shared between DEV_SYSTEM (get it right) and TEAM_LEAD_QUALITY_SYSTEM (check for it),
+# so the bar a dev is told to meet and the bar they're actually held to stay the same bar.
+QUALITY_STANDARDS = """
+A few standing expectations worth getting right the first time, not after a review round flags them:
+- If the domain implies an order/sequence to how things get applied (steps, priority, precedence),
+  make that ordering explicit in the design (a real field/parameter) — don't leave it implicit and
+  assumed, that's exactly the kind of gap a later review finds and sends back for a costly re-round.
+- Cover the primary end-to-end path with an integration/happy-path test, not just isolated unit tests
+  of individual pieces — the pieces working alone doesn't mean the path through all of them does.
+- Wire any side-effecting or background work (kicking off a job, sending a request, starting
+  processing) from exactly one place. Double-check a route handler and the service layer underneath
+  it aren't both triggering the same action.
+- When comparing enum/status values, compare against the actual enum member, not a string that
+  happens to match its name — those aren't guaranteed interchangeable."""
+
 MERGE_CONFLICT_SYSTEM = """You are the engineering team lead resolving a git merge conflict. You have
 file tools scoped to the project root. Read each conflicted file, resolve the <<<<<<< / ======= / >>>>>>>
 markers by keeping the correct combined result (both changes if they don't actually contradict, otherwise
@@ -128,10 +146,11 @@ Your work will be checked by a later reviewer that both scope-checks it and actu
 round trip by meeting that bar on the first pass: match the surrounding code's formatting, no secrets
 or unsafe shell/eval usage, and run the project's own tests/linter yourself via run_shell before you
 report done, fixing anything that fails.
+{quality_standards}
 {dependency_convention}
 
 When you are done, reply with a short plain-text summary of what you changed and stop calling tools.
-""".format(dependency_convention=DEPENDENCY_CONVENTION)
+""".format(quality_standards=QUALITY_STANDARDS, dependency_convention=DEPENDENCY_CONVENTION)
 
 TEAM_LEAD_QUALITY_SYSTEM = """You are the engineering team lead reviewing your developers' work,
 purely on quality — UX and accuracy. Nothing else: not scope, not security, not formatting, those are
@@ -143,10 +162,13 @@ on a genuinely non-obvious WHY, a small robustness gap), make that one edit with
 same pass. If the code is already solid, approve and make NO edits — don't invent busywork just to
 have touched something; an unnecessary edit costs a tool call and risks introducing a new issue for no
 benefit.
+
+Check for these specifically — recurring gaps worth catching here rather than another round later:
+{quality_standards}
 {dependency_convention}
 End your final message with ONLY this JSON on its own, no other text:
 {"verdict": "approve" or "revise", "notes": "1-3 sentences — if revise, be specific about what you don't like"}""".replace(
-    "{dependency_convention}", DEPENDENCY_CONVENTION)
+    "{quality_standards}", QUALITY_STANDARDS).replace("{dependency_convention}", DEPENDENCY_CONVENTION)
 
 CHECK_AND_TEST_SYSTEM = """You are both the checker and tester for this code, combined into one pass —
 review it once, thoroughly, instead of two separate reviewers each re-reading the same diff from
@@ -250,7 +272,7 @@ def run_dev_agent(developer_id: int, tasks: list, worktree_path: str, extra_inst
     if extra_instructions:
         prompt += f"\n\nAdditional instructions from the user:\n{extra_instructions}"
     report_text = call_openai_with_tools(model, DEV_SYSTEM, tools.openai_tool_defs(), tools.tool_impls(),
-                                          prompt, max_turns=14)
+                                          prompt, max_turns=10)
     return {"developer": developer_id, "report": report_text, "tool_log": tools.log}
 
 
@@ -272,7 +294,7 @@ def team_lead_quality_gate(subtasks: list, diff: str, worktree_path: str, instru
     if instructions:
         prompt += f"\n\nUser instructions for you specifically:\n{instructions}"
     text = call_openai_with_tools(model, TEAM_LEAD_QUALITY_SYSTEM, tools.openai_tool_defs(), tools.tool_impls(),
-                                   prompt, max_turns=6)
+                                   prompt, max_turns=5)
     return extract_json_object(text)
 
 
@@ -285,7 +307,7 @@ def check_and_test(subtasks: list, diff: str, worktree_path: str, instructions: 
     if instructions:
         prompt += f"\n\nUser instructions for you specifically:\n{instructions}"
     text = call_openai_with_tools(model, CHECK_AND_TEST_SYSTEM, tools.openai_tool_defs(include_write=False),
-                                   tools.tool_impls(), prompt, max_turns=8)
+                                   tools.tool_impls(), prompt, max_turns=6)
     return extract_json_object(text)
 
 
