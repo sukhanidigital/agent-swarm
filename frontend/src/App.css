@@ -96,6 +96,19 @@ body::before {
   justify-content: center;
   position: relative;
 }
+.header-btn-group {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.header-btn-group .library-btn {
+  position: static;
+  transform: none;
+}
 .library-btn {
   position: absolute;
   left: 0;
@@ -1084,6 +1097,59 @@ body::before {
 .btn-start {
   margin-top: 1.1rem;
   width: 100%;
+}
+
+/* ---- project picker (Boot-up) + projects list (Manage projects) ---- */
+
+.project-picker-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.15);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.project-picker-btn:hover {
+  border-color: var(--accent);
+  background: rgba(129, 140, 248, 0.06);
+}
+.project-picker-btn svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.project-list-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--glass);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.project-list-item:hover {
+  border-color: var(--accent);
+  background: rgba(129, 140, 248, 0.06);
+}
+.project-list-item svg {
+  color: var(--accent);
+  flex-shrink: 0;
 }
 
 .btn-danger {

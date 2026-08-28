@@ -70,6 +70,18 @@ export async function createRepo({ path, github }) {
   return res.json(); // { path }
 }
 
+export async function listProjects() {
+  const res = await apiFetch("/projects");
+  if (!res.ok) throw new Error(`Couldn't list projects: ${await res.text()}`);
+  return res.json(); // [{ id, name, path, created_at }]
+}
+
+export async function createProject(name) {
+  const res = await jsonFetch("/projects", { name });
+  if (!res.ok) throw new Error(`Couldn't create project: ${await res.text()}`);
+  return res.json(); // { id, name, path, created_at }
+}
+
 export async function startChat({ repoPath }) {
   const res = await jsonFetch("/chat/start", { repo_path: repoPath });
   if (!res.ok) throw new Error(`Couldn't start chat: ${await res.text()}`);

@@ -62,6 +62,22 @@ def _slugify(prompt: str) -> str:
     return slug[:40] or "task"
 
 
+def create_project_repo(name: str, projects_root: str) -> dict:
+    """Turns a plain project name ("Sunrise Dental Website") into a fresh repo under projects_root,
+    slugified into a directory name the user never has to see or type — see api/main.py's /projects.
+    Appends -2, -3, ... on a slug collision (two projects that slugify the same, e.g. "Foo!" and
+    "foo?") instead of raising, since the name is what the user actually chose to be unique, not the
+    slug."""
+    slug = _slugify(name)
+    root = Path(projects_root)
+    path = root / slug
+    n = 2
+    while path.exists():
+        path = root / f"{slug}-{n}"
+        n += 1
+    return init_repo(str(path))
+
+
 def init_repo(path: str) -> dict:
     """`git init` at path plus a starter commit, so a job can `git worktree add -b` off it
     immediately — a brand-new repo has no commits and an unborn HEAD, which that command can't branch

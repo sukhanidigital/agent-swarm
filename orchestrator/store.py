@@ -39,6 +39,15 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 """
 
+PROJECTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    path TEXT NOT NULL UNIQUE,
+    created_at REAL NOT NULL
+);
+"""
+
 _MIGRATIONS = [
     ("gate_attempts", "TEXT NOT NULL DEFAULT '{}'"),
     ("current_gate", "TEXT"),
@@ -65,6 +74,7 @@ def _connect():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.execute(SCHEMA)
+    conn.execute(PROJECTS_SCHEMA)
     for column, decl in _MIGRATIONS:
         try:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {decl}")
@@ -74,6 +84,26 @@ def _connect():
 
 
 DEFAULT_GATE_CAPS = {"team_lead": 5, "check_and_test": 5, "auditor": 5}
+
+
+def create_project(name: str, path: str) -> dict:
+    """Row tracking a project the "Select project"/"Manage projects" UI created — the repo itself
+    (git_tools.create_project_repo) is the source of truth for the path; this is just what lets the
+    UI show project *names* instead of ever surfacing that path to the user."""
+    project_id = str(uuid.uuid4())
+    now = time.time()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO projects (id, name, path, created_at) VALUES (?, ?, ?, ?)",
+            (project_id, name, path, now),
+        )
+    return {"id": project_id, "name": name, "path": path, "created_at": now}
+
+
+def list_projects() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute("SELECT id, name, path, created_at FROM projects ORDER BY created_at DESC").fetchall()
+    return [{"id": r[0], "name": r[1], "path": r[2], "created_at": r[3]} for r in rows]
 
 
 def create_job(prompt: str, repo_path: str, config: dict, plan: list, max_cost: float = 1.0,

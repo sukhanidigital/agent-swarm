@@ -13,8 +13,13 @@ from pydantic import BaseModel
 from api.auth import require_api_key
 from orchestrator import chat, runner, store
 from orchestrator.agents import CLAUDE_MODELS, DEFAULT_MODELS, OPENAI_MODELS, PROVIDERS, TREE_PHASES, plan_project
-from orchestrator.git_tools import init_repo
+from orchestrator.git_tools import create_project_repo, init_repo
 from orchestrator.pipeline import repo_listing, resume_job, run_job
+
+# Where "Select project"/"Manage projects" (frontend) creates new project repos — /repos inside the
+# container (docker-compose.yml's REPOS_DIR bind mount always lands there regardless of the host path
+# REPOS_DIR points to), overridable for local non-Docker dev via PROJECTS_ROOT in .env.
+PROJECTS_ROOT = os.environ.get("PROJECTS_ROOT", "/repos")
 
 # dependencies=[...] applies to every route below (except /login, exempted in api/auth.py) — this
 # backend runs shell/dev-agent commands against whatever repo_path it's given, so once it's reachable
@@ -174,6 +179,28 @@ def create_repo(req: CreateRepoRequest):
         return init_repo(req.path)
     except RuntimeError as exc:
         raise HTTPException(400, str(exc))
+
+
+class ProjectRequest(BaseModel):
+    name: str
+
+
+@app.get("/projects")
+def list_projects():
+    return store.list_projects()
+
+
+@app.post("/projects")
+def create_project_endpoint(req: ProjectRequest):
+    """The user-facing counterpart to /repos — takes a plain name ("Sunrise Dental Website") instead
+    of a filesystem path, since that's the only thing a non-technical user should ever have to type.
+    Slugifies it into a repo under PROJECTS_ROOT (git_tools.create_project_repo) and records the
+    name/path pair so the UI can list projects by name and resolve back to the real path on select."""
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(400, "Project name is required.")
+    result = create_project_repo(name, PROJECTS_ROOT)
+    return store.create_project(name, result["path"])
 
 
 @app.post("/chat/start")

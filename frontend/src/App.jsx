@@ -7,6 +7,7 @@ import {
   planProject, submitJob, getJob, stopJob, resumeJob,
   createRepo, startChat, sendChatMessage, startRun, getRunStatus, stopRun,
   startPathRun, getPathRunStatus, stopPathRun, getModelConfig, login,
+  listProjects, createProject,
 } from "./api";
 import { estimatePlan, formatMinutes } from "./estimate";
 import { getApiUrl, setApiUrl, getApiKey, setApiKey, isConfigured } from "./config";
@@ -37,7 +38,9 @@ function parseBlockKey(block) {
 function App() {
   // --- pre-run planning state ---
   const [prompt, setPrompt] = useState("");
-  const [repoPath, setRepoPath] = useState("");
+  const [repoPath, setRepoPath] = useState(""); // the real server-side path — never shown to the
+  // user directly; the Projects modal is what sets this, displayed to the user only as a name
+  const [selectedProjectName, setSelectedProjectName] = useState("");
   const [plannerInstructions, setPlannerInstructions] = useState("");
   const [plan, setPlan] = useState(null); // null = not planned yet; array of trees once planned
   const [planLoading, setPlanLoading] = useState(false);
@@ -152,6 +155,54 @@ function App() {
   const [createRepoLoading, setCreateRepoLoading] = useState(false);
   const [createRepoError, setCreateRepoError] = useState("");
 
+  // --- projects (stacked modal, reachable from either Boot-up's "Select project" or the home
+  // screen's "Manage projects" — the user-facing replacement for typing/creating a raw repo path;
+  // see PROJECTS_ROOT in api/main.py) ---
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [projectsMode, setProjectsMode] = useState("list"); // "list" | "create"
+  const [projects, setProjects] = useState([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [projectsError, setProjectsError] = useState("");
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectCreating, setNewProjectCreating] = useState(false);
+  const [newProjectError, setNewProjectError] = useState("");
+
+  function openProjects() {
+    setProjectsMode("list");
+    setProjectsOpen(true);
+    setProjectsLoading(true);
+    setProjectsError("");
+    listProjects().then(setProjects).catch((err) => setProjectsError(err.message))
+      .finally(() => setProjectsLoading(false));
+  }
+
+  function selectProject(project) {
+    setRepoPath(project.path);
+    setSelectedProjectName(project.name);
+    setProjectsOpen(false);
+  }
+
+  function startCreateProject() {
+    setProjectsMode("create");
+    setNewProjectName("");
+    setNewProjectError("");
+  }
+
+  function handleCreateProject() {
+    const name = newProjectName.trim();
+    if (!name) {
+      setNewProjectError("Enter a name.");
+      return;
+    }
+    setNewProjectError("");
+    setNewProjectCreating(true);
+    createProject(name).then((project) => {
+      setProjects((prev) => [project, ...prev]);
+      selectProject(project);
+    }).catch((err) => setNewProjectError(err.message))
+      .finally(() => setNewProjectCreating(false));
+  }
+
   // --- run state ---
   // Seeded from localStorage so a page reload (a laptop sleep/wake can trigger one) reattaches to
   // whatever job was in flight instead of losing it — the actual state always lives server-side.
@@ -180,6 +231,7 @@ function App() {
     setPlan(null);
     setPrompt("");
     setRepoPath("");
+    setSelectedProjectName("");
     setPlannerInstructions("");
     setBlockInstructions({});
     setGateCaps(DEFAULT_GATE_CAPS);
@@ -244,7 +296,7 @@ function App() {
 
   async function handlePlan() {
     if (!prompt.trim() || !repoPath.trim()) {
-      setPlanError("Prompt and repo path are required.");
+      setPlanError("A prompt and a selected project are required.");
       return;
     }
     setPlanError("");
@@ -328,7 +380,10 @@ function App() {
     setCreateRepoLoading(true);
     try {
       const { path } = await createRepo({ path: createRepoPath, github: createRepoGithub });
-      setRepoPath(path); // fills the Boot-up modal's repo path field underneath
+      setRepoPath(path);
+      // this legacy path-based flow has no project name of its own — fall back to the path's last
+      // segment so the Boot-up "Project" button doesn't read "Select project" despite one being set
+      setSelectedProjectName(path.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || path);
       setCreateRepoOpen(false);
       setCreateRepoPath("");
     } catch (err) {
@@ -364,9 +419,14 @@ function App() {
     <div className="app">
       <div className={`hero${job ? "" : " hero-idle"}`}>
         <header className="app-header">
-          <button className="library-btn" onClick={() => setLibraryOpen(true)} aria-label="Agent Library">
-            <Icon name="briefcase" size={15} /> <span className="library-btn-label">Agent Library</span>
-          </button>
+          <div className="header-btn-group">
+            <button className="library-btn" onClick={() => setLibraryOpen(true)} aria-label="Agent Library">
+              <Icon name="briefcase" size={15} /> <span className="library-btn-label">Agent Library</span>
+            </button>
+            <button className="library-btn" onClick={openProjects} aria-label="Manage projects">
+              <Icon name="folder" size={15} /> <span className="library-btn-label">Manage projects</span>
+            </button>
+          </div>
           <div className="brand"><Icon name="rocket" size={22} /> <span>Agent Swarm</span></div>
           <button className="settings-btn" onClick={() => {
             setDraftApiUrl(getApiUrl()); setDraftApiKey(getApiKey()); setSettingsOpen(true);
@@ -454,10 +514,9 @@ function App() {
           ) : !plan ? (
             <PlanForm
               prompt={prompt} setPrompt={setPrompt}
-              repoPath={repoPath} setRepoPath={setRepoPath}
+              selectedProjectName={selectedProjectName} onOpenProjects={openProjects}
               plannerInstructions={plannerInstructions} setPlannerInstructions={setPlannerInstructions}
               planLoading={planLoading} planError={planError} onPlan={handlePlan}
-              onOpenCreateRepo={() => { setCreateRepoError(""); setCreateRepoOpen(true); }}
               plannerModel={blockModels.planner || modelConfig?.default_models?.planner || ""}
               setPlannerModel={(m) => setBlockModels((prev) => ({ ...prev, planner: m }))}
               claudeModels={modelConfig?.claude_models || []}
@@ -486,6 +545,16 @@ function App() {
 
       {libraryOpen && (
         <AgentLibraryModal plan={plan} onClose={() => setLibraryOpen(false)} onStartWizard={startWizard} />
+      )}
+
+      {projectsOpen && (
+        <ProjectsModal
+          mode={projectsMode} projects={projects} loading={projectsLoading} error={projectsError}
+          newProjectName={newProjectName} setNewProjectName={setNewProjectName}
+          newProjectCreating={newProjectCreating} newProjectError={newProjectError}
+          onSelect={selectProject} onStartCreate={startCreateProject} onBackToList={() => setProjectsMode("list")}
+          onCreate={handleCreateProject} onClose={() => setProjectsOpen(false)}
+        />
       )}
 
       {settingsOpen && (
@@ -591,18 +660,18 @@ function StatusBar({ job, onStop, onOpenDetail }) {
   );
 }
 
-function PlanForm({ prompt, setPrompt, repoPath, setRepoPath, plannerInstructions, setPlannerInstructions,
-  planLoading, planError, onPlan, onOpenCreateRepo, plannerModel, setPlannerModel, claudeModels }) {
+function PlanForm({ prompt, setPrompt, selectedProjectName, onOpenProjects, plannerInstructions, setPlannerInstructions,
+  planLoading, planError, onPlan, plannerModel, setPlannerModel, claudeModels }) {
   return (
     <>
       <label>What do you want built?</label>
       <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)}
         placeholder="e.g. Add input validation to the signup form and a unit test for it" />
-      <div className="label-row">
-        <label>Target repo path</label>
-        <button className="btn-link" onClick={onOpenCreateRepo}>+ create new repo</button>
-      </div>
-      <input value={repoPath} onChange={(e) => setRepoPath(e.target.value)} placeholder="C:\path\to\your\project" />
+      <label>Project</label>
+      <button type="button" className="project-picker-btn" onClick={onOpenProjects}>
+        <Icon name="folder" size={16} />
+        <span>{selectedProjectName || "Select project"}</span>
+      </button>
       <label>Instructions for the planner (optional)</label>
       <textarea value={plannerInstructions} onChange={(e) => setPlannerInstructions(e.target.value)}
         placeholder="e.g. Keep this to 1 tree, don't over-split" />
@@ -749,6 +818,43 @@ function CreateRepoFields({ path, setPath, github, setGithub, loading, error, on
         {loading ? "Creating..." : "Create repo"}
       </button>
     </>
+  );
+}
+
+function ProjectsModal({ mode, projects, loading, error, newProjectName, setNewProjectName,
+  newProjectCreating, newProjectError, onSelect, onStartCreate, onBackToList, onCreate, onClose }) {
+  if (mode === "create") {
+    return (
+      <Modal title="Create a new project" onClose={onClose}>
+        <button type="button" className="btn-link" onClick={onBackToList}>&larr; back to projects</button>
+        <label>Project name</label>
+        <input value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)}
+          placeholder="e.g. Sunrise Dental Website" autoFocus />
+        {newProjectError && <p className="error-text">{newProjectError}</p>}
+        <button className="btn-primary btn-start" onClick={onCreate} disabled={newProjectCreating}>
+          {newProjectCreating ? "Creating..." : "Create project"}
+        </button>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal title="Projects" onClose={onClose}>
+      <button type="button" className="btn-primary btn-start" onClick={onStartCreate}>+ Create project</button>
+      {loading && <p className="role-desc">Loading...</p>}
+      {error && <p className="error-text">{error}</p>}
+      {!loading && !error && projects.length === 0 && (
+        <p className="role-desc">No projects yet — create one to get started.</p>
+      )}
+      <div className="project-list">
+        {projects.map((project) => (
+          <button type="button" key={project.id} className="project-list-item" onClick={() => onSelect(project)}>
+            <Icon name="folder" size={16} />
+            <span>{project.name}</span>
+          </button>
+        ))}
+      </div>
+    </Modal>
   );
 }
 
