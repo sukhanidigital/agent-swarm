@@ -5,7 +5,10 @@ FROM python:3.12-slim
 
 # git: every job branches real worktrees off a target repo (orchestrator/git_tools.py) — without the
 # git binary present, every run would fail immediately, not degrade gracefully.
-RUN apt-get update && apt-get install -y --no-install-recommends git \
+# ffmpeg: dev agents' run_shell (orchestrator/dev_tools.py) executes directly in this container, so
+# any job whose app shells out to ffmpeg (video processing, etc.) needs the binary present here too —
+# not just in whatever repo it's building.
+RUN apt-get update && apt-get install -y --no-install-recommends git ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
