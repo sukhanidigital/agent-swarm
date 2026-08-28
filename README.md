@@ -18,8 +18,7 @@ env\Scripts\activate
 pip install -r requirements.txt
 ```
 
-`.env` needs `ANTHROPIC_API_KEY` and `GOOGLE_API_KEY` (both required). `SUPABASE_URL`/`SUPABASE_KEY`
-are optional — see "Lessons-learned memory" below; the pipeline runs fine without them.
+`.env` needs `ANTHROPIC_API_KEY` and `GOOGLE_API_KEY` (both required).
 
 Frontend (needs [Node.js](https://nodejs.org) LTS installed first):
 ```bash
@@ -83,14 +82,12 @@ estimate, not a billing-accurate number — Gemini's automatic function-calling 
 expose per-internal-turn usage, so multi-turn calls may be undercounted. Claude's manual tool loop is
 fully accurate.
 
-## Lessons-learned memory (optional, Supabase)
+## Lessons-learned memory
 
-If `SUPABASE_URL`/`SUPABASE_KEY` are set, every gate verdict and job outcome gets logged, and the
-most recent rejections for a target repo are folded into a short digest fed back into the planner and
-dev prompts — so repeated mistakes on the same repo get less likely over time. Create the two tables
-manually in your Supabase project's SQL editor first — the `CREATE TABLE` statements are in the
-docstring at the top of `orchestrator/memory.py`. Left as placeholders, this whole layer is a no-op;
-nothing else in the pipeline depends on it.
+Every gate verdict and job outcome gets logged, and the most recent rejections for a target repo are
+folded into a short digest fed back into the planner and dev prompts — so repeated mistakes on the
+same repo get less likely over time. Backed by the same local SQLite file as job history
+(`orchestrator/store.py`) — no external service, no setup, on by default for every deployment.
 
 ## Notes
 

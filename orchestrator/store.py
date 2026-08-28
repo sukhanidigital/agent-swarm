@@ -48,6 +48,33 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 """
 
+# Lessons-learned memory (see orchestrator/memory.py, a thin re-export of the three functions below) —
+# same local file as everything else here, no external service or config needed.
+SWARM_RUNS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS swarm_runs (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    repo_path TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    status TEXT NOT NULL,
+    cost_estimate REAL,
+    total_retries INTEGER,
+    created_at REAL NOT NULL
+);
+"""
+SWARM_GATE_EVENTS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS swarm_gate_events (
+    id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    repo_path TEXT NOT NULL,
+    gate TEXT NOT NULL,
+    round INTEGER NOT NULL,
+    verdict TEXT NOT NULL,
+    notes TEXT,
+    created_at REAL NOT NULL
+);
+"""
+
 _MIGRATIONS = [
     ("gate_attempts", "TEXT NOT NULL DEFAULT '{}'"),
     ("current_gate", "TEXT"),
@@ -75,6 +102,8 @@ def _connect():
     conn = sqlite3.connect(DB_PATH)
     conn.execute(SCHEMA)
     conn.execute(PROJECTS_SCHEMA)
+    conn.execute(SWARM_RUNS_SCHEMA)
+    conn.execute(SWARM_GATE_EVENTS_SCHEMA)
     for column, decl in _MIGRATIONS:
         try:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} {decl}")
@@ -104,6 +133,38 @@ def list_projects() -> list[dict]:
     with _connect() as conn:
         rows = conn.execute("SELECT id, name, path, created_at FROM projects ORDER BY created_at DESC").fetchall()
     return [{"id": r[0], "name": r[1], "path": r[2], "created_at": r[3]} for r in rows]
+
+
+def log_gate_verdict(job_id: str, repo_path: str, gate: str, round_num: int, verdict: str, notes: str):
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO swarm_gate_events (id, job_id, repo_path, gate, round, verdict, notes, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), job_id, repo_path, gate, round_num, verdict, notes, time.time()),
+        )
+
+
+def log_job_summary(job_id: str, repo_path: str, prompt: str, status: str, cost_estimate: float, total_retries: int):
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO swarm_runs (id, job_id, repo_path, prompt, status, cost_estimate, total_retries, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), job_id, repo_path, prompt, status, cost_estimate, total_retries, time.time()),
+        )
+
+
+def get_lessons(repo_path: str, limit: int = 8) -> str:
+    """Short digest of recent rejection notes for this repo, meant to be folded into a prompt — not
+    full history, just enough to steer the next attempt away from repeated mistakes."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT gate, notes FROM swarm_gate_events WHERE repo_path = ? AND verdict != 'approve' "
+            "ORDER BY created_at DESC LIMIT ?",
+            (repo_path, limit),
+        ).fetchall()
+    if not rows:
+        return ""
+    return "\n".join(f"- [{gate}] {notes}" for gate, notes in rows)
 
 
 def create_job(prompt: str, repo_path: str, config: dict, plan: list, max_cost: float = 1.0,
