@@ -366,7 +366,7 @@ def run_job(job_id: str):
     try:
         store.update_job(job_id, status="running", gate_attempts=gate_attempts, cost_estimate=0, block_status={})
 
-        log(f"Fetching lessons learned for {repo_path} from Supabase (if configured)...")
+        log(f"Fetching lessons learned for {repo_path}...")
         lessons = memory.get_lessons(repo_path)
         if lessons:
             log(f"Found lessons from past runs:\n{lessons}")

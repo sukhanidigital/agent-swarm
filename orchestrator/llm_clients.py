@@ -31,10 +31,26 @@ def safe_json_load(text: str):
 
 
 def extract_json_object(text: str):
-    """Pull the last {...} object out of a longer message — gate agents narrate their tool use
-    before ending with a JSON verdict, so we can't assume the whole message is JSON."""
-    start, end = text.find("{"), text.rfind("}")
-    if start == -1 or end == -1 or end < start:
+    """Pull the trailing {...} object out of a longer message — gate agents narrate their tool use
+    before ending with a JSON verdict, so we can't assume the whole message is JSON. Naive first-'{'-
+    to-last-'}' slicing breaks the moment that narration itself mentions a brace anywhere (a JSON
+    schema example, a dict literal in an explanation — routine when the task involves designing a
+    schema), grabbing everything in between and failing to parse with "Extra data". Brace-match
+    backward from the last '}' to find its true matching '{' instead, so any braces earlier in the
+    narration can't widen the slice."""
+    end = text.rfind("}")
+    if end == -1:
+        raise ValueError(f"No JSON object found in response: {text[:300]}")
+    depth, start = 0, None
+    for i in range(end, -1, -1):
+        if text[i] == "}":
+            depth += 1
+        elif text[i] == "{":
+            depth -= 1
+            if depth == 0:
+                start = i
+                break
+    if start is None:
         raise ValueError(f"No JSON object found in response: {text[:300]}")
     return safe_json_load(text[start:end + 1])
 

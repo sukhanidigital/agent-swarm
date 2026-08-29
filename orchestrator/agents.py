@@ -272,7 +272,7 @@ def run_dev_agent(developer_id: int, tasks: list, worktree_path: str, extra_inst
     if extra_instructions:
         prompt += f"\n\nAdditional instructions from the user:\n{extra_instructions}"
     report_text = call_openai_with_tools(model, DEV_SYSTEM, tools.openai_tool_defs(), tools.tool_impls(),
-                                          prompt, max_turns=10)
+                                          prompt, max_turns=14)
     return {"developer": developer_id, "report": report_text, "tool_log": tools.log}
 
 
