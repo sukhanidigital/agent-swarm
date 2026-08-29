@@ -29,6 +29,25 @@ app = FastAPI(title="Agent Swarm", dependencies=[Depends(require_api_key)])
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
+@app.on_event("startup")
+def resume_self_healed_jobs():
+    """A self-heal (orchestrator/self_heal.py) marks a job pending_self_heal_resume and then replaces
+    this whole process (os.execv) to apply its patch — this is the other half, run once on every boot:
+    pick up any job left in that state and resume it. Runs unconditionally (not just after a self-heal
+    restart) since it's a no-op — list_pending_self_heal_jobs() is empty — on every normal boot."""
+    for job_id in store.list_pending_self_heal_jobs():
+        store.update_job(job_id, pending_self_heal_resume=0)
+
+        def _resume(job_id=job_id):
+            try:
+                resume_job(job_id, "Resuming after an orchestrator self-heal patch.")
+            except Exception as exc:  # noqa: BLE001 - a broken resume must not crash startup itself
+                store.append_log(job_id, f"Could not auto-resume after self-heal restart: {exc}")
+                store.update_job(job_id, status="failed", stuck_reason=None)
+
+        threading.Thread(target=_resume, daemon=True).start()
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str

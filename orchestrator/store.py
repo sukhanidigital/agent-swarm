@@ -94,6 +94,11 @@ _MIGRATIONS = [
     # dict means "use agents.DEFAULT_MODELS" — pipeline.py fills in any gap, this column only ever
     # needs to hold what the user actually overrode.
     ("models", "TEXT NOT NULL DEFAULT '{}'"),
+    # Self-healing (see orchestrator/self_heal.py) — capped per job to stop a bad "fix" from looping,
+    # and a flag api/main.py's startup hook scans for to auto-resume a job whose crash was patched.
+    ("self_heal_attempts", "INTEGER NOT NULL DEFAULT 0"),
+    ("pending_self_heal_resume", "INTEGER NOT NULL DEFAULT 0"),
+    ("self_heal_notes", "TEXT"),
 ]
 
 
@@ -267,3 +272,11 @@ def list_jobs() -> list[dict]:
             job["models"] = json.loads(job["models"]) if job["models"] else {}
             jobs.append(job)
         return jobs
+
+
+def list_pending_self_heal_jobs() -> list[str]:
+    """Job ids whose crash was patched and are waiting for the process restart that applies the fix
+    to finish, so api/main.py's startup hook can auto-resume them — see orchestrator/self_heal.py."""
+    with _connect() as conn:
+        rows = conn.execute("SELECT id FROM jobs WHERE pending_self_heal_resume = 1").fetchall()
+    return [r[0] for r in rows]

@@ -24,7 +24,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from orchestrator import cost, memory, notify, store
+from orchestrator import cost, memory, notify, self_heal, store
 from orchestrator.agents import (
     DEFAULT_MODELS,
     audit,
@@ -392,6 +392,8 @@ def run_job(job_id: str):
 
     except Exception as exc:  # noqa: BLE001 - surface any failure to the job log instead of crashing the server
         log(f"ERROR: {exc}")
+        if self_heal.try_self_heal(job_id):
+            return  # patched and restarting — self-heal owns finishing/resuming this job, not us
         finish("failed")
         raise
 
@@ -448,5 +450,7 @@ def resume_job(job_id: str, instructions: str):
 
     except Exception as exc:  # noqa: BLE001
         log(f"ERROR: {exc}")
+        if self_heal.try_self_heal(job_id):
+            return  # patched and restarting — self-heal owns finishing/resuming this job, not us
         finish("failed")
         raise
