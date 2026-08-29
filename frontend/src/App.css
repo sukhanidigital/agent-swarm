@@ -185,25 +185,6 @@ body::before {
   align-items: start;
 }
 
-/* Second block on the idle landing screen (Ask about your code / Run / Create repo), rendered below
-   the hero so it can scroll independently instead of being squeezed into the "fits one screen" hero
-   below. Mobile-first: plain block, the side-panel just takes the full width. Desktop mirrors the
-   hero's column layout so the card stack lines up under "How this works" instead of spanning full
-   width. */
-.layout-more {
-  margin-top: 2.5rem;
-}
-@media (min-width: 981px) {
-  .layout-more {
-    display: grid;
-    grid-template-columns: minmax(360px, 500px) 1fr;
-    gap: 2.5rem;
-  }
-  .layout-more .side-panel {
-    grid-column: 2;
-  }
-}
-
 @media (max-width: 980px) {
   .layout {
     grid-template-columns: 1fr;
@@ -844,11 +825,6 @@ body::before {
 .agent-bubble-active {
   border-color: var(--accent);
   background: var(--accent-soft);
-  /* Open the bottom edge (and only this bubble's) so it flows straight into the description's top
-     edge instead of drawing a complete rectangle that would still read as a separate box. */
-  border-bottom: none;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
 }
 .agent-bubble-icon {
   width: 44px;
@@ -909,25 +885,20 @@ body::before {
 }
 /* .agent-library-grid prefix (not just .agent-bubble-desc) is required for specificity: the generic
    ".modal-body p" rule below is class+element (0,1,1), which otherwise beats a bare ".agent-bubble-
-   desc" class selector (0,1,0) and silently wins the margin-top/bottom fight — this is exactly why
-   the negative margin wasn't visually canceling the grid gap before. */
+   desc" class selector (0,1,0). A complete, separate box (not flush-merged via negative margin) —
+   that merge trick pulled the description up into whichever *other* bubbles shared its row (anything
+   not the active one keeps its normal bottom edge), clipping into their content. Full margin/border
+   on all sides reads as its own card, safe regardless of how many bubbles share the row above it. */
 .agent-library-grid .agent-bubble-desc {
   grid-column: 1 / -1;
-  /* Cancel the grid's row gap above this element so it sits flush against the row it belongs to —
-     bonded to the active bubble via matching accent border + zero gap, not a floating box below it.
-     A couple px past exact cancellation on purpose: same background/border color as the active
-     bubble, so a slight overlap is invisible, whereas subpixel rounding under-cancelling it left a
-     visible 1-2px sliver of a gap. */
-  margin-top: -18px;
-  margin-bottom: 0;
+  margin: 0;
   text-align: left;
   color: var(--ink);
   font-size: 0.85rem;
   line-height: 1.6;
   background: var(--accent-soft);
   border: 1px solid var(--accent);
-  border-top: none;
-  border-radius: 0 0 14px 14px;
+  border-radius: 14px;
   padding: 0.9rem 1.1rem 1rem;
 }
 

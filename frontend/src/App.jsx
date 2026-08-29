@@ -457,44 +457,38 @@ function App() {
                   resumeText={resumeText} setResumeText={setResumeText} onStartNew={startNewRun} />
               </div>
             ) : (
-              <div className="side-card side-idle">
-                <h3>How this works</h3>
-                <p>Click <strong>Boot-up</strong> to plan a run, then review the trees Claude proposes
-                  before confirming. Click any node to add instructions or set a retry cap.</p>
-                <p>Once running, this panel fills in with the live log, cost, and (if needed) a resume box.</p>
+              <div className="side-idle-stack">
+                <div className="side-card side-idle">
+                  <h3>How this works</h3>
+                  <p>Click <strong>Boot-up</strong> to plan a run, then review the trees Claude proposes
+                    before confirming. Click any node to add instructions or set a retry cap.</p>
+                  <p>Once running, this panel fills in with the live log, cost, and (if needed) a resume box.</p>
+                </div>
+
+                <div className="side-card">
+                  <h3>Ask about your code</h3>
+                  <ChatPanel repoPath={repoPath} selectedProjectName={selectedProjectName}
+                    onOpenProjects={() => openProjects(selectGlobalProject)} onUsePrompt={handleUsePrompt} />
+                </div>
+
+                <div className="side-row-half">
+                  <div className="side-card side-half">
+                    <h3>Run</h3>
+                    <HomeRunCard onOpenProjects={openProjects} />
+                  </div>
+                  <div className="side-card side-half">
+                    <h3>New project</h3>
+                    <p className="role-desc">Start a fresh project — no path, no setup, just a name.</p>
+                    <button className="btn-primary btn-start" onClick={() => openCreateProject(selectGlobalProject)}>
+                      + Create project
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </aside>
         </div>
       </div>
-
-      {!job && (
-        <div className="layout-more">
-          <aside className="side-panel">
-            <div className="side-idle-stack">
-              <div className="side-card">
-                <h3>Ask about your code</h3>
-                <ChatPanel repoPath={repoPath} selectedProjectName={selectedProjectName}
-                  onOpenProjects={() => openProjects(selectGlobalProject)} onUsePrompt={handleUsePrompt} />
-              </div>
-
-              <div className="side-row-half">
-                <div className="side-card side-half">
-                  <h3>Run</h3>
-                  <HomeRunCard onOpenProjects={openProjects} />
-                </div>
-                <div className="side-card side-half">
-                  <h3>New project</h3>
-                  <p className="role-desc">Start a fresh project — no path, no setup, just a name.</p>
-                  <button className="btn-primary btn-start" onClick={() => openCreateProject(selectGlobalProject)}>
-                    + Create project
-                  </button>
-                </div>
-              </div>
-            </div>
-          </aside>
-        </div>
-      )}
 
       {activeModal === "boot_up" && (
         <Modal title="Boot-up" onClose={closeModal}>
